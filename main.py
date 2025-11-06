@@ -5,6 +5,7 @@ import google.generativeai as genai
 import pandas as pd
 import io
 import os
+import sys
 import json
 from typing import List, Dict
 from pydantic import BaseModel
@@ -12,20 +13,28 @@ from dotenv import load_dotenv
 import logging
 from datetime import datetime
 
+# Configure logging first
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
 # Load environment variables
 load_dotenv()
 
 # Config
 GEMINI_KEY = os.getenv("GEMINI_KEY")
 if not GEMINI_KEY:
+    logger.error("GEMINI_KEY environment variable is missing!")
     raise ValueError("GEMINI_KEY environment variable is required. Please set it in your environment or Render dashboard.")
 
-genai.configure(api_key=GEMINI_KEY)
-app = FastAPI(title="ClaimGuard AI Auditor")
+try:
+    genai.configure(api_key=GEMINI_KEY)
+    logger.info("Gemini AI configured successfully")
+except Exception as e:
+    logger.error(f"Failed to configure Gemini AI: {str(e)}")
+    raise
 
-# Configure logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+app = FastAPI(title="ClaimGuard AI Auditor")
+logger.info("FastAPI app initialized")
 
 # Mount static files
 app.mount("/static", StaticFiles(directory="static"), name="static")
@@ -97,9 +106,16 @@ async def audit_claims(file: UploadFile = File(...)):
         # Read file (CSV or Excel)
         try:
             if file_ext in ['xlsx', 'xls']:
-                df = pd.read_excel(io.BytesIO(content), engine='openpyxl')
+                try:
+                    df = pd.read_excel(io.BytesIO(content), engine='openpyxl')
+                except ImportError:
+                    raise HTTPException(500, "Excel support requires openpyxl package. Please contact support.")
+                except Exception as e:
+                    raise HTTPException(400, f"Invalid Excel file. Error: {str(e)}. Please check your file format.")
             else:
                 df = pd.read_csv(io.BytesIO(content))
+        except HTTPException:
+            raise
         except Exception as e:
             file_type = "Excel" if file_ext in ['xlsx', 'xls'] else "CSV"
             raise HTTPException(400, f"Invalid {file_type} file. Error: {str(e)}. Please check your file format.")
@@ -346,12 +362,29 @@ async def export_results(audit_data: dict):
 @app.get("/health")
 def health_check():
     """Health check endpoint for monitoring"""
-    return {
-        "status": "healthy",
-        "service": "ClaimGuard AI",
-        "gemini_configured": bool(GEMINI_KEY),
-        "max_file_size_mb": MAX_FILE_SIZE / (1024 * 1024)
-    }
+    try:
+        # Test if openpyxl is available
+        openpyxl_available = False
+        try:
+            import openpyxl
+            openpyxl_available = True
+        except ImportError:
+            pass
+        
+        return {
+            "status": "healthy",
+            "service": "ClaimGuard AI",
+            "gemini_configured": bool(GEMINI_KEY),
+            "max_file_size_mb": MAX_FILE_SIZE / (1024 * 1024),
+            "excel_support": openpyxl_available,
+            "python_version": sys.version.split()[0]
+        }
+    except Exception as e:
+        logger.error(f"Health check error: {str(e)}")
+        return {
+            "status": "error",
+            "error": str(e)
+        }
 
 if __name__ == "__main__":
     import uvicorn
