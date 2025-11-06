@@ -50,7 +50,25 @@ DENIAL_RULES = {
     "CO-11": "Diagnosis doesn't match procedure – appeal with medical necessity docs.",
     "CO-15": "Invalid auth number – resubmit with correct prior auth.",
     "CO-97": "Bundled service – unbundle or appeal as distinct.",
-    "CO-167": "Non-covered service – check policy, appeal if experimental."
+    "CO-167": "Non-covered service – check policy, appeal if experimental.",
+    "CO-4": "Procedure code inconsistent with modifier – verify modifier usage.",
+    "CO-18": "Duplicate claim – check if already processed.",
+    "CO-19": "Claim denied due to benefit maximum – verify coverage limits.",
+    "CO-22": "Care may be covered by another payer – coordinate benefits.",
+    "CO-24": "Charges exceed fee schedule – verify allowed amounts.",
+    "CO-27": "Expenses incurred after coverage terminated – verify dates.",
+    "CO-29": "Time limit for filing has expired – check timely filing rules.",
+    "CO-50": "These are non-covered services – review policy exclusions.",
+    "CO-96": "Non-covered charge(s) – verify medical necessity.",
+    "CO-109": "Claim not covered by this payer – wrong insurance.",
+    "CO-110": "Billing date predates service date – verify dates.",
+    "CO-119": "Benefit maximum for this time period has been reached.",
+    "PR-1": "Deductible amount – patient responsibility.",
+    "PR-2": "Coinsurance amount – patient responsibility.",
+    "PR-3": "Copayment amount – patient responsibility.",
+    "PR-96": "Non-covered charge(s) – patient responsibility.",
+    "OA-18": "Claim/service lacks information needed for adjudication.",
+    "OA-23": "Impact of prior payer(s) adjudication – coordination of benefits."
 }
 
 @app.post("/audit", response_model=AuditResult)
@@ -58,8 +76,12 @@ async def audit_claims(file: UploadFile = File(...)):
     logger.info(f"Received file upload: {file.filename}")
     
     # Validate file type
-    if not file.filename or not file.filename.endswith('.csv'):
-        raise HTTPException(400, "Only CSV files are supported. Please upload a .csv file.")
+    if not file.filename:
+        raise HTTPException(400, "No file provided. Please upload a CSV or Excel file.")
+    
+    file_ext = file.filename.lower().split('.')[-1] if '.' in file.filename else ''
+    if file_ext not in ['csv', 'xlsx', 'xls']:
+        raise HTTPException(400, "Only CSV and Excel (.xlsx, .xls) files are supported.")
     
     try:
         # Read and validate file size
@@ -70,16 +92,20 @@ async def audit_claims(file: UploadFile = File(...)):
             raise HTTPException(400, f"File too large. Maximum size is {MAX_FILE_SIZE / (1024*1024):.1f}MB. Your file is {file_size / (1024*1024):.1f}MB.")
         
         if file_size == 0:
-            raise HTTPException(400, "File is empty. Please upload a valid CSV file.")
+            raise HTTPException(400, "File is empty. Please upload a valid CSV or Excel file.")
         
-        # Read CSV
+        # Read file (CSV or Excel)
         try:
-            df = pd.read_csv(io.BytesIO(content))
+            if file_ext in ['xlsx', 'xls']:
+                df = pd.read_excel(io.BytesIO(content), engine='openpyxl')
+            else:
+                df = pd.read_csv(io.BytesIO(content))
         except Exception as e:
-            raise HTTPException(400, f"Invalid CSV file. Error: {str(e)}. Please check your file format.")
+            file_type = "Excel" if file_ext in ['xlsx', 'xls'] else "CSV"
+            raise HTTPException(400, f"Invalid {file_type} file. Error: {str(e)}. Please check your file format.")
         
         if df.empty:
-            raise HTTPException(400, "CSV file is empty or has no data rows.")
+            raise HTTPException(400, "File is empty or has no data rows.")
         
         # Validate required columns
         missing_columns = [col for col in REQUIRED_COLUMNS if col not in df.columns]
@@ -123,18 +149,21 @@ async def audit_claims(file: UploadFile = File(...)):
         chunk_size = 50
         all_flagged = []
         total_recovery = 0.0
+        total_chunks = (len(df) - 1) // chunk_size + 1
         
         try:
             # Process all claims in chunks
-            for chunk_start in range(0, len(df), chunk_size):
+            for chunk_idx, chunk_start in enumerate(range(0, len(df), chunk_size), 1):
                 chunk_end = min(chunk_start + chunk_size, len(df))
                 chunk_df = df.iloc[chunk_start:chunk_end]
                 chunk_data = chunk_df.to_json(orient='records')
                 
+                logger.info(f"Processing chunk {chunk_idx}/{total_chunks} (claims {chunk_start+1}-{chunk_end} of {len(df)})")
+                
                 # Update prompt to indicate chunk processing
                 chunk_prompt = prompt_template.format(data=chunk_data)
                 if chunk_start > 0:
-                    chunk_prompt += f"\n\nNote: This is chunk {chunk_start//chunk_size + 1} of {(len(df)-1)//chunk_size + 1}. Process claims {chunk_start+1} to {chunk_end}."
+                    chunk_prompt += f"\n\nNote: This is chunk {chunk_idx} of {total_chunks}. Process claims {chunk_start+1} to {chunk_end}."
                 
                 response = model.generate_content(chunk_prompt)
                 
@@ -219,8 +248,12 @@ async def audit_claims(file: UploadFile = File(...)):
                 except:
                     pass
             
-            # Generate enhanced appeals with more context
-            for issue in flagged[:3]:  # Top 3
+            # Generate enhanced appeals with more context for all flagged claims
+            logger.info(f"Generating appeal letters for {len(flagged)} flagged claims...")
+            for idx, issue in enumerate(flagged, 1):
+                if idx > 20:  # Limit to 20 appeals to avoid timeout
+                    logger.info(f"Limiting appeal generation to first 20 claims to avoid timeout")
+                    break
                 try:
                     patient_id = issue.get('patient_id', df.iloc[0]['patient_id'] if 'patient_id' in df.columns else 'N/A')
                     procedure = issue.get('procedure_code', 'N/A')

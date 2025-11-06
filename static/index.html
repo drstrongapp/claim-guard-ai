@@ -282,6 +282,52 @@
             border-radius: 20px;
             font-weight: 600;
         }
+        
+        @media (max-width: 768px) {
+            .container {
+                margin: 10px;
+                border-radius: 15px;
+            }
+            
+            .header {
+                padding: 25px 20px;
+            }
+            
+            .header h1 {
+                font-size: 1.8em;
+            }
+            
+            .content {
+                padding: 20px;
+            }
+            
+            .stats {
+                grid-template-columns: 1fr;
+            }
+            
+            .stat-card h3 {
+                font-size: 2em;
+            }
+            
+            .claims-table {
+                font-size: 0.9em;
+            }
+            
+            .claims-table th,
+            .claims-table td {
+                padding: 10px 8px;
+            }
+            
+            .upload-section {
+                padding: 25px 15px;
+            }
+            
+            #searchInput,
+            #denialFilter {
+                width: 100%;
+                max-width: 100%;
+            }
+        }
     </style>
 </head>
 <body>
@@ -293,12 +339,12 @@
         
         <div class="content">
             <div class="upload-section" id="uploadSection">
-                <h2 style="color: #667eea; margin-bottom: 20px;">Upload Your Claims CSV File</h2>
-                <p style="color: #666; margin-bottom: 30px;">Drag and drop your CSV file here, or click to browse</p>
+                <h2 style="color: #667eea; margin-bottom: 20px;">Upload Your Claims File</h2>
+                <p style="color: #666; margin-bottom: 30px;">Drag and drop your CSV or Excel file here, or click to browse</p>
                 <div class="file-input-wrapper">
-                    <input type="file" id="fileInput" class="file-input" accept=".csv">
+                    <input type="file" id="fileInput" class="file-input" accept=".csv,.xlsx,.xls">
                     <button class="upload-btn" onclick="document.getElementById('fileInput').click()">
-                        Choose CSV File
+                        Choose File (CSV/Excel)
                     </button>
                 </div>
                 <div class="file-name" id="fileName"></div>
@@ -309,12 +355,18 @@
             <div class="loading" id="loading">
                 <div class="spinner"></div>
                 <p id="loadingText">Analyzing claims with AI... This may take a moment.</p>
+                <p id="progressText" style="margin-top: 10px; color: #667eea; font-weight: 600;"></p>
                 <div id="progressBar" style="width: 100%; max-width: 400px; height: 8px; background: #e0e0e0; border-radius: 4px; margin: 20px auto; overflow: hidden;">
                     <div id="progressFill" style="height: 100%; background: linear-gradient(90deg, #667eea, #764ba2); width: 0%; transition: width 0.3s;"></div>
                 </div>
             </div>
             
             <div class="results" id="results">
+                <div style="text-align: right; margin-bottom: 20px;">
+                    <button class="upload-btn" onclick="resetForm()" style="background: #6c757d;">
+                        🔄 New Upload
+                    </button>
+                </div>
                 <div class="stats">
                     <div class="stat-card">
                         <h3 id="totalClaims">0</h3>
@@ -404,9 +456,14 @@
             e.preventDefault();
             uploadSection.classList.remove('dragover');
             const files = e.dataTransfer.files;
-            if (files.length > 0 && files[0].name.endsWith('.csv')) {
-                fileInput.files = files;
-                handleFileSelect();
+            if (files.length > 0) {
+                const fileName = files[0].name.toLowerCase();
+                if (fileName.endsWith('.csv') || fileName.endsWith('.xlsx') || fileName.endsWith('.xls')) {
+                    fileInput.files = files;
+                    handleFileSelect();
+                } else {
+                    showError('Please upload a CSV or Excel file (.csv, .xlsx, .xls)');
+                }
             }
         });
         
@@ -415,7 +472,9 @@
         function handleFileSelect() {
             const file = fileInput.files[0];
             if (file) {
-                fileName.textContent = `Selected: ${file.name}`;
+                const fileSize = (file.size / 1024).toFixed(2);
+                const fileType = file.name.toLowerCase().endsWith('.xlsx') || file.name.toLowerCase().endsWith('.xls') ? 'Excel' : 'CSV';
+                fileName.textContent = `Selected: ${file.name} (${fileType}, ${fileSize} KB)`;
                 uploadFile(file);
             }
         }
@@ -428,6 +487,11 @@
             loading.classList.add('active');
             results.classList.remove('active');
             errorMessage.classList.remove('active');
+            
+            // Reset and start progress simulation
+            document.getElementById('progressFill').style.width = '0%';
+            document.getElementById('progressText').textContent = 'Uploading file...';
+            const progressInterval = simulateProgress();
             
             try {
                 const response = await fetch('/audit', {
@@ -447,12 +511,23 @@
                 }
                 
                 const data = await response.json();
-                displayResults(data);
+                
+                // Complete progress
+                clearInterval(progressInterval);
+                document.getElementById('progressFill').style.width = '100%';
+                document.getElementById('progressText').textContent = 'Analysis complete!';
+                
+                setTimeout(() => {
+                    displayResults(data);
+                }, 500);
             } catch (error) {
+                clearInterval(progressInterval);
                 console.error('Upload error:', error);
                 showError(error.message || 'An unexpected error occurred. Please try again.');
             } finally {
-                loading.classList.remove('active');
+                setTimeout(() => {
+                    loading.classList.remove('active');
+                }, 1000);
             }
         }
         
@@ -733,6 +808,35 @@
         function showError(message) {
             errorMessage.textContent = `Error: ${message}`;
             errorMessage.classList.add('active');
+        }
+        
+        function resetForm() {
+            // Reset file input
+            fileInput.value = '';
+            fileName.textContent = '';
+            
+            // Hide results and errors
+            results.classList.remove('active');
+            errorMessage.classList.remove('active');
+            loading.classList.remove('active');
+            
+            // Reset progress
+            document.getElementById('progressFill').style.width = '0%';
+            document.getElementById('progressText').textContent = '';
+            
+            // Scroll to top
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+        }
+        
+        // Simulate progress during upload (since we can't get real-time progress from backend)
+        function simulateProgress() {
+            let progress = 0;
+            const interval = setInterval(() => {
+                progress += Math.random() * 15;
+                if (progress > 90) progress = 90; // Don't go to 100% until done
+                document.getElementById('progressFill').style.width = progress + '%';
+            }, 500);
+            return interval;
         }
     </script>
 </body>
