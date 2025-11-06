@@ -298,14 +298,23 @@
                 </div>
                 
                 <div class="flagged-claims" id="flaggedSection">
-                    <h2>🚩 Flagged Claims</h2>
-                    <table class="claims-table">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+                        <h2>🚩 Flagged Claims</h2>
+                        <button class="upload-btn" id="exportBtn" onclick="exportResults()" style="display: none;">
+                            📥 Export Results
+                        </button>
+                    </div>
+                    <div style="margin-bottom: 15px;">
+                        <input type="text" id="searchInput" placeholder="🔍 Search claims..." 
+                               style="padding: 10px; width: 100%; max-width: 400px; border: 2px solid #667eea; border-radius: 8px; font-size: 1em;">
+                    </div>
+                    <table class="claims-table" id="claimsTable">
                         <thead>
                             <tr>
-                                <th>Patient ID</th>
-                                <th>Procedure Code</th>
-                                <th>Diagnosis Code</th>
-                                <th>Denial Code</th>
+                                <th onclick="sortTable(0)" style="cursor: pointer;">Patient ID ↕️</th>
+                                <th onclick="sortTable(1)" style="cursor: pointer;">Procedure Code ↕️</th>
+                                <th onclick="sortTable(2)" style="cursor: pointer;">Diagnosis Code ↕️</th>
+                                <th onclick="sortTable(3)" style="cursor: pointer;">Denial Code ↕️</th>
                                 <th>Reason</th>
                                 <th>Appeal Strategy</th>
                             </tr>
@@ -397,20 +406,56 @@
             }
         }
         
+        let currentData = null;
+        let sortDirection = {};
+        
         function displayResults(data) {
+            currentData = data; // Store for export
+            
             // Update stats
             document.getElementById('totalClaims').textContent = data.total_claims;
             document.getElementById('flaggedCount').textContent = data.flagged.length;
             document.getElementById('recoveryEstimate').textContent = `$${data.recovery_estimate.toLocaleString()}`;
             
+            // Show export button if there are flagged claims
+            const exportBtn = document.getElementById('exportBtn');
+            if (data.flagged.length > 0) {
+                exportBtn.style.display = 'inline-block';
+            } else {
+                exportBtn.style.display = 'none';
+            }
+            
             // Display flagged claims
+            renderTable(data.flagged);
+            
+            // Display appeals
+            displayAppeals(data.appeals);
+            
+            // Setup search
+            const searchInput = document.getElementById('searchInput');
+            searchInput.oninput = () => {
+                const searchTerm = searchInput.value.toLowerCase();
+                const filtered = data.flagged.filter(claim => 
+                    JSON.stringify(claim).toLowerCase().includes(searchTerm)
+                );
+                renderTable(filtered);
+            };
+            
+            // Show results
+            results.classList.add('active');
+            
+            // Scroll to results
+            results.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }
+        
+        function renderTable(flagged) {
             const tableBody = document.getElementById('claimsTableBody');
             tableBody.innerHTML = '';
             
-            if (data.flagged.length === 0) {
+            if (flagged.length === 0) {
                 tableBody.innerHTML = '<tr><td colspan="6" style="text-align: center; padding: 40px; color: #51cf66; font-size: 1.2em;">✅ No issues found! All claims look good.</td></tr>';
             } else {
-                data.flagged.forEach(claim => {
+                flagged.forEach(claim => {
                     const row = document.createElement('tr');
                     row.innerHTML = `
                         <td>${claim.patient_id || claim.row || 'N/A'}</td>
@@ -423,15 +468,85 @@
                     tableBody.appendChild(row);
                 });
             }
+        }
+        
+        function sortTable(columnIndex) {
+            if (!currentData || !currentData.flagged.length) return;
             
-            // Display appeals
+            const table = document.getElementById('claimsTable');
+            const tbody = table.querySelector('tbody');
+            const rows = Array.from(tbody.querySelectorAll('tr'));
+            
+            // Toggle sort direction
+            sortDirection[columnIndex] = sortDirection[columnIndex] === 'asc' ? 'desc' : 'asc';
+            const direction = sortDirection[columnIndex];
+            
+            // Sort rows
+            rows.sort((a, b) => {
+                const aText = a.cells[columnIndex].textContent.trim();
+                const bText = b.cells[columnIndex].textContent.trim();
+                
+                // Try numeric comparison first
+                const aNum = parseFloat(aText);
+                const bNum = parseFloat(bText);
+                if (!isNaN(aNum) && !isNaN(bNum)) {
+                    return direction === 'asc' ? aNum - bNum : bNum - aNum;
+                }
+                
+                // String comparison
+                return direction === 'asc' 
+                    ? aText.localeCompare(bText)
+                    : bText.localeCompare(aText);
+            });
+            
+            // Re-append sorted rows
+            rows.forEach(row => tbody.appendChild(row));
+        }
+        
+        function exportResults() {
+            if (!currentData || !currentData.flagged.length) {
+                alert('No data to export');
+                return;
+            }
+            
+            // Create CSV content
+            const headers = ['Patient ID', 'Procedure Code', 'Diagnosis Code', 'Denial Code', 'Reason', 'Appeal Strategy'];
+            const rows = currentData.flagged.map(claim => [
+                claim.patient_id || claim.row || 'N/A',
+                claim.procedure_code || 'N/A',
+                claim.diagnosis_code || 'N/A',
+                claim.denial_code || 'N/A',
+                (claim.reason || 'N/A').replace(/"/g, '""'), // Escape quotes
+                (claim.appeal || 'N/A').replace(/"/g, '""')
+            ]);
+            
+            // Create CSV string
+            const csvContent = [
+                headers.map(h => `"${h}"`).join(','),
+                ...rows.map(row => row.map(cell => `"${cell}"`).join(','))
+            ].join('\n');
+            
+            // Create blob and download
+            const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+            const link = document.createElement('a');
+            const url = URL.createObjectURL(blob);
+            link.setAttribute('href', url);
+            link.setAttribute('download', `claimguard_audit_${new Date().toISOString().split('T')[0]}.csv`);
+            link.style.visibility = 'hidden';
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+        }
+        
+        // Display appeals (called from displayResults)
+        function displayAppeals(appeals) {
             const appealsContainer = document.getElementById('appealsContainer');
             appealsContainer.innerHTML = '';
             
-            if (data.appeals.length === 0) {
+            if (appeals.length === 0) {
                 appealsContainer.innerHTML = '<p style="color: #666; padding: 20px;">No appeal letters generated.</p>';
             } else {
-                data.appeals.forEach((appeal, index) => {
+                appeals.forEach((appeal, index) => {
                     const appealCard = document.createElement('div');
                     appealCard.className = 'appeal-card';
                     appealCard.innerHTML = `
@@ -441,12 +556,6 @@
                     appealsContainer.appendChild(appealCard);
                 });
             }
-            
-            // Show results
-            results.classList.add('active');
-            
-            // Scroll to results
-            results.scrollIntoView({ behavior: 'smooth', block: 'start' });
         }
         
         function showError(message) {

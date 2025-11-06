@@ -1,5 +1,5 @@
 from fastapi import FastAPI, UploadFile, File, HTTPException
-from fastapi.responses import JSONResponse, FileResponse
+from fastapi.responses import JSONResponse, FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 import google.generativeai as genai
 import pandas as pd
@@ -9,6 +9,8 @@ import json
 from typing import List, Dict
 from pydantic import BaseModel
 from dotenv import load_dotenv
+import logging
+from datetime import datetime
 
 # Load environment variables
 load_dotenv()
@@ -21,8 +23,16 @@ if not GEMINI_KEY:
 genai.configure(api_key=GEMINI_KEY)
 app = FastAPI(title="ClaimGuard AI Auditor")
 
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
 # Mount static files
 app.mount("/static", StaticFiles(directory="static"), name="static")
+
+# Configuration
+MAX_FILE_SIZE = 10 * 1024 * 1024  # 10MB
+REQUIRED_COLUMNS = ['patient_id', 'procedure_code', 'diagnosis_code', 'amount']
 
 class AuditResult(BaseModel):
     total_claims: int
@@ -43,16 +53,47 @@ DENIAL_RULES = {
 
 @app.post("/audit", response_model=AuditResult)
 async def audit_claims(file: UploadFile = File(...)):
-    if not file.filename.endswith('.csv'):
-        raise HTTPException(400, "Upload CSV only")
+    logger.info(f"Received file upload: {file.filename}")
+    
+    # Validate file type
+    if not file.filename or not file.filename.endswith('.csv'):
+        raise HTTPException(400, "Only CSV files are supported. Please upload a .csv file.")
     
     try:
-        # Read CSV (sample format: patient_id, procedure_code, diagnosis_code, amount, auth_num)
+        # Read and validate file size
         content = await file.read()
-        df = pd.read_csv(io.BytesIO(content))
+        file_size = len(content)
+        
+        if file_size > MAX_FILE_SIZE:
+            raise HTTPException(400, f"File too large. Maximum size is {MAX_FILE_SIZE / (1024*1024):.1f}MB. Your file is {file_size / (1024*1024):.1f}MB.")
+        
+        if file_size == 0:
+            raise HTTPException(400, "File is empty. Please upload a valid CSV file.")
+        
+        # Read CSV
+        try:
+            df = pd.read_csv(io.BytesIO(content))
+        except Exception as e:
+            raise HTTPException(400, f"Invalid CSV file. Error: {str(e)}. Please check your file format.")
         
         if df.empty:
-            raise HTTPException(400, "Empty file")
+            raise HTTPException(400, "CSV file is empty or has no data rows.")
+        
+        # Validate required columns
+        missing_columns = [col for col in REQUIRED_COLUMNS if col not in df.columns]
+        if missing_columns:
+            raise HTTPException(400, f"Missing required columns: {', '.join(missing_columns)}. Required columns are: {', '.join(REQUIRED_COLUMNS)}")
+        
+        # Validate data types
+        if 'amount' in df.columns:
+            try:
+                df['amount'] = pd.to_numeric(df['amount'], errors='coerce')
+                if df['amount'].isna().any():
+                    raise HTTPException(400, "Invalid amount values found. Amount column must contain numbers.")
+            except Exception:
+                raise HTTPException(400, "Amount column must contain numeric values.")
+        
+        logger.info(f"Processing {len(df)} claims from file {file.filename}")
         
         total_claims = len(df)
         flagged = []
@@ -172,13 +213,43 @@ def root():
     """Serve the main web interface"""
     return FileResponse("static/index.html")
 
+@app.post("/export")
+async def export_results(audit_data: dict):
+    """Export audit results as CSV"""
+    try:
+        flagged = audit_data.get("flagged", [])
+        if not flagged:
+            raise HTTPException(400, "No flagged claims to export")
+        
+        # Create DataFrame from flagged claims
+        export_df = pd.DataFrame(flagged)
+        
+        # Create CSV in memory
+        output = io.StringIO()
+        export_df.to_csv(output, index=False)
+        output.seek(0)
+        
+        # Generate filename with timestamp
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"claimguard_audit_{timestamp}.csv"
+        
+        return StreamingResponse(
+            io.BytesIO(output.getvalue().encode()),
+            media_type="text/csv",
+            headers={"Content-Disposition": f"attachment; filename={filename}"}
+        )
+    except Exception as e:
+        logger.error(f"Export error: {str(e)}")
+        raise HTTPException(500, f"Export failed: {str(e)}")
+
 @app.get("/health")
 def health_check():
     """Health check endpoint for monitoring"""
     return {
         "status": "healthy",
         "service": "ClaimGuard AI",
-        "gemini_configured": bool(GEMINI_KEY)
+        "gemini_configured": bool(GEMINI_KEY),
+        "max_file_size_mb": MAX_FILE_SIZE / (1024 * 1024)
     }
 
 if __name__ == "__main__":
