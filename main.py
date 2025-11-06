@@ -73,34 +73,69 @@ async def audit_claims(file: UploadFile = File(...)):
     }}
     """
         
-        # Batch audit (simulate 100 claims; scale with chunks)
-        data_sample = df.head(10).to_json(orient='records')  # Sample for prompt
+        # Process all claims - chunk for large files (Gemini has token limits)
         model = genai.GenerativeModel('models/gemini-2.0-flash')
         
+        # Process in chunks of 50 claims at a time for large files
+        chunk_size = 50
+        all_flagged = []
+        total_recovery = 0.0
+        
         try:
-            response = model.generate_content(prompt_template.format(data=data_sample))
-            
-            if not response or not hasattr(response, 'text'):
-                raise HTTPException(500, "No response from AI model")
-            
-            # Extract JSON from response (Gemini may wrap in markdown)
-            response_text = response.text.strip()
-            
-            # Remove markdown code blocks if present
-            if response_text.startswith("```json"):
-                response_text = response_text[7:]
-            elif response_text.startswith("```"):
-                response_text = response_text[3:]
-            if response_text.endswith("```"):
-                response_text = response_text[:-3]
-            response_text = response_text.strip()
-            
-            ai_output = json.loads(response_text)
-            flagged = ai_output.get("flagged_claims", [])
-            recovery_potential = float(ai_output.get("total_recovery", 0))
+            # Process all claims in chunks
+            for chunk_start in range(0, len(df), chunk_size):
+                chunk_end = min(chunk_start + chunk_size, len(df))
+                chunk_df = df.iloc[chunk_start:chunk_end]
+                chunk_data = chunk_df.to_json(orient='records')
+                
+                # Update prompt to indicate chunk processing
+                chunk_prompt = prompt_template.format(data=chunk_data)
+                if chunk_start > 0:
+                    chunk_prompt += f"\n\nNote: This is chunk {chunk_start//chunk_size + 1} of {(len(df)-1)//chunk_size + 1}. Process claims {chunk_start+1} to {chunk_end}."
+                
+                response = model.generate_content(chunk_prompt)
+                
+                if not response or not hasattr(response, 'text'):
+                    raise HTTPException(500, f"No response from AI model for chunk {chunk_start//chunk_size + 1}")
+                
+                # Extract JSON from response (Gemini may wrap in markdown)
+                response_text = response.text.strip()
+                
+                # Remove markdown code blocks if present
+                if response_text.startswith("```json"):
+                    response_text = response_text[7:]
+                elif response_text.startswith("```"):
+                    response_text = response_text[3:]
+                if response_text.endswith("```"):
+                    response_text = response_text[:-3]
+                response_text = response_text.strip()
+                
+                ai_output = json.loads(response_text)
+                chunk_flagged = ai_output.get("flagged_claims", [])
+                chunk_recovery = float(ai_output.get("total_recovery", 0))
+                
+                # Adjust row numbers to match actual dataframe indices
+                for claim in chunk_flagged:
+                    if 'row' in claim:
+                        # Convert row number to actual index (AI returns 1-based, we need 0-based)
+                        original_row = int(claim.get('row', 1))
+                        claim['row'] = chunk_start + original_row - 1
+                    # Add patient_id and other fields from actual dataframe if available
+                    row_idx = claim.get('row', chunk_start)
+                    if isinstance(row_idx, int) and 0 <= row_idx < len(df):
+                        if 'patient_id' not in claim and 'patient_id' in df.columns:
+                            claim['patient_id'] = str(df.iloc[row_idx]['patient_id'])
+                        if 'procedure_code' not in claim and 'procedure_code' in df.columns:
+                            claim['procedure_code'] = str(df.iloc[row_idx]['procedure_code'])
+                        if 'diagnosis_code' not in claim and 'diagnosis_code' in df.columns:
+                            claim['diagnosis_code'] = str(df.iloc[row_idx]['diagnosis_code'])
+                
+                all_flagged.extend(chunk_flagged)
+                total_recovery += chunk_recovery
             
             # Ensure flagged items are proper dicts
-            flagged = [dict(item) if isinstance(item, dict) else item for item in flagged]
+            flagged = [dict(item) if isinstance(item, dict) else item for item in all_flagged]
+            recovery_potential = total_recovery
             
             # Generate sample appeals
             for issue in flagged[:3]:  # Top 3
