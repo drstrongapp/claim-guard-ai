@@ -13,7 +13,11 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # Config
-genai.configure(api_key=os.getenv("GEMINI_KEY"))
+GEMINI_KEY = os.getenv("GEMINI_KEY")
+if not GEMINI_KEY:
+    raise ValueError("GEMINI_KEY environment variable is required. Please set it in your environment or Render dashboard.")
+
+genai.configure(api_key=GEMINI_KEY)
 app = FastAPI(title="ClaimGuard AI Auditor")
 
 class AuditResult(BaseModel):
@@ -119,6 +123,15 @@ async def audit_claims(file: UploadFile = File(...)):
 @app.get("/")
 def root():
     return {"msg": "ClaimGuard AI: Upload CSV to /audit for denial audit + appeals"}
+
+@app.get("/health")
+def health_check():
+    """Health check endpoint for monitoring"""
+    return {
+        "status": "healthy",
+        "service": "ClaimGuard AI",
+        "gemini_configured": bool(GEMINI_KEY)
+    }
 
 if __name__ == "__main__":
     import uvicorn
