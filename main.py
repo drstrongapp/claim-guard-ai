@@ -1,5 +1,6 @@
 from fastapi import FastAPI, UploadFile, File, HTTPException
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, FileResponse
+from fastapi.staticfiles import StaticFiles
 import google.generativeai as genai
 import pandas as pd
 import io
@@ -19,6 +20,9 @@ if not GEMINI_KEY:
 
 genai.configure(api_key=GEMINI_KEY)
 app = FastAPI(title="ClaimGuard AI Auditor")
+
+# Mount static files
+app.mount("/static", StaticFiles(directory="static"), name="static")
 
 class AuditResult(BaseModel):
     total_claims: int
@@ -122,7 +126,8 @@ async def audit_claims(file: UploadFile = File(...)):
 
 @app.get("/")
 def root():
-    return {"msg": "ClaimGuard AI: Upload CSV to /audit for denial audit + appeals"}
+    """Serve the main web interface"""
+    return FileResponse("static/index.html")
 
 @app.get("/health")
 def health_check():
