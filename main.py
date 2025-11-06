@@ -26,9 +26,12 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 
 class AuditResult(BaseModel):
     total_claims: int
-    flagged: List[Dict]
-    recovery_estimate: float  # $ potential
-    appeals: List[str]  # Auto-generated letters
+    flagged: List[Dict] = []
+    recovery_estimate: float = 0.0  # $ potential
+    appeals: List[str] = []  # Auto-generated letters
+    
+    class Config:
+        extra = "allow"  # Allow extra fields
 
 # Common denial rules (expand with AI)
 DENIAL_RULES = {
@@ -94,7 +97,10 @@ async def audit_claims(file: UploadFile = File(...)):
             
             ai_output = json.loads(response_text)
             flagged = ai_output.get("flagged_claims", [])
-            recovery_potential = ai_output.get("total_recovery", 0)
+            recovery_potential = float(ai_output.get("total_recovery", 0))
+            
+            # Ensure flagged items are proper dicts
+            flagged = [dict(item) if isinstance(item, dict) else item for item in flagged]
             
             # Generate sample appeals
             for issue in flagged[:3]:  # Top 3
@@ -112,12 +118,14 @@ async def audit_claims(file: UploadFile = File(...)):
         except Exception as e:
             raise HTTPException(500, f"AI processing error: {str(e)}")
         
-        return AuditResult(
-            total_claims=total_claims,
-            flagged=flagged,
-            recovery_estimate=recovery_potential,
-            appeals=appeals
+        # Ensure all data types are correct
+        result = AuditResult(
+            total_claims=int(total_claims),
+            flagged=flagged if flagged else [],
+            recovery_estimate=float(recovery_potential) if recovery_potential else 0.0,
+            appeals=appeals if appeals else []
         )
+        return result
     
     except HTTPException:
         raise

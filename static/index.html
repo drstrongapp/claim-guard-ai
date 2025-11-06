@@ -377,14 +377,21 @@
                 });
                 
                 if (!response.ok) {
-                    const error = await response.json();
-                    throw new Error(error.detail || 'Upload failed');
+                    let errorText = 'Upload failed';
+                    try {
+                        const error = await response.json();
+                        errorText = error.detail || error.message || JSON.stringify(error);
+                    } catch (e) {
+                        errorText = await response.text() || `HTTP ${response.status}: ${response.statusText}`;
+                    }
+                    throw new Error(errorText);
                 }
                 
                 const data = await response.json();
                 displayResults(data);
             } catch (error) {
-                showError(error.message);
+                console.error('Upload error:', error);
+                showError(error.message || 'An unexpected error occurred. Please try again.');
             } finally {
                 loading.classList.remove('active');
             }
