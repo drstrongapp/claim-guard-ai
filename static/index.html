@@ -228,8 +228,38 @@
         
         .appeal-text {
             color: #555;
-            line-height: 1.6;
+            line-height: 1.8;
             white-space: pre-wrap;
+            background: white;
+            padding: 15px;
+            border-radius: 8px;
+            margin-top: 10px;
+        }
+        
+        .appeal-card {
+            position: relative;
+        }
+        
+        .copy-appeal-btn {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            background: #667eea;
+            color: white;
+            border: none;
+            padding: 8px 15px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 0.9em;
+            transition: background 0.2s;
+        }
+        
+        .copy-appeal-btn:hover {
+            background: #764ba2;
+        }
+        
+        .copy-appeal-btn:active {
+            background: #51cf66;
         }
         
         .error {
@@ -317,9 +347,15 @@
                             📥 Export Results
                         </button>
                     </div>
-                    <div style="margin-bottom: 15px;">
+                    <div style="margin-bottom: 15px; display: flex; gap: 15px; flex-wrap: wrap; align-items: center;">
                         <input type="text" id="searchInput" placeholder="🔍 Search claims..." 
-                               style="padding: 10px; width: 100%; max-width: 400px; border: 2px solid #667eea; border-radius: 8px; font-size: 1em;">
+                               style="padding: 10px; flex: 1; min-width: 200px; max-width: 400px; border: 2px solid #667eea; border-radius: 8px; font-size: 1em;">
+                        <select id="denialFilter" style="padding: 10px; border: 2px solid #667eea; border-radius: 8px; font-size: 1em; background: white; cursor: pointer;">
+                            <option value="">All Denial Codes</option>
+                        </select>
+                        <button onclick="clearFilters()" style="padding: 10px 20px; border: 2px solid #667eea; border-radius: 8px; background: white; color: #667eea; cursor: pointer; font-size: 1em;">
+                            Clear Filters
+                        </button>
                     </div>
                     <table class="claims-table" id="claimsTable">
                         <thead>
@@ -327,7 +363,8 @@
                                 <th onclick="sortTable(0)" style="cursor: pointer;">Patient ID ↕️</th>
                                 <th onclick="sortTable(1)" style="cursor: pointer;">Procedure Code ↕️</th>
                                 <th onclick="sortTable(2)" style="cursor: pointer;">Diagnosis Code ↕️</th>
-                                <th onclick="sortTable(3)" style="cursor: pointer;">Denial Code ↕️</th>
+                                <th onclick="sortTable(3)" style="cursor: pointer;">Amount ↕️</th>
+                                <th onclick="sortTable(4)" style="cursor: pointer;">Denial Code ↕️</th>
                                 <th>Reason</th>
                                 <th>Appeal Strategy</th>
                             </tr>
@@ -450,15 +487,16 @@
             // Display appeals
             displayAppeals(data.appeals);
             
+            // Setup search and filters
+            setupFilters(data.flagged, data.denial_stats);
+            
             // Setup search
             const searchInput = document.getElementById('searchInput');
-            searchInput.oninput = () => {
-                const searchTerm = searchInput.value.toLowerCase();
-                const filtered = data.flagged.filter(claim => 
-                    JSON.stringify(claim).toLowerCase().includes(searchTerm)
-                );
-                renderTable(filtered);
-            };
+            searchInput.oninput = applyFilters;
+            
+            // Setup denial code filter
+            const denialFilter = document.getElementById('denialFilter');
+            denialFilter.onchange = applyFilters;
             
             // Show results
             results.classList.add('active');
@@ -505,14 +543,17 @@
             tableBody.innerHTML = '';
             
             if (flagged.length === 0) {
-                tableBody.innerHTML = '<tr><td colspan="6" style="text-align: center; padding: 40px; color: #51cf66; font-size: 1.2em;">✅ No issues found! All claims look good.</td></tr>';
+                tableBody.innerHTML = '<tr><td colspan="7" style="text-align: center; padding: 40px; color: #51cf66; font-size: 1.2em;">✅ No issues found! All claims look good.</td></tr>';
             } else {
                 flagged.forEach(claim => {
                     const row = document.createElement('tr');
+                    const amount = claim.claim_amount || claim.amount || 0;
+                    const formattedAmount = amount ? `$${parseFloat(amount).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}` : 'N/A';
                     row.innerHTML = `
                         <td>${claim.patient_id || claim.row || 'N/A'}</td>
                         <td>${claim.procedure_code || 'N/A'}</td>
                         <td>${claim.diagnosis_code || 'N/A'}</td>
+                        <td style="font-weight: 600; color: #667eea;">${formattedAmount}</td>
                         <td><span class="denial-code">${claim.denial_code || 'N/A'}</span></td>
                         <td>${claim.reason || 'N/A'}</td>
                         <td>${claim.appeal || 'N/A'}</td>
@@ -562,15 +603,19 @@
             }
             
             // Create CSV content
-            const headers = ['Patient ID', 'Procedure Code', 'Diagnosis Code', 'Denial Code', 'Reason', 'Appeal Strategy'];
-            const rows = currentData.flagged.map(claim => [
-                claim.patient_id || claim.row || 'N/A',
-                claim.procedure_code || 'N/A',
-                claim.diagnosis_code || 'N/A',
-                claim.denial_code || 'N/A',
-                (claim.reason || 'N/A').replace(/"/g, '""'), // Escape quotes
-                (claim.appeal || 'N/A').replace(/"/g, '""')
-            ]);
+            const headers = ['Patient ID', 'Procedure Code', 'Diagnosis Code', 'Amount', 'Denial Code', 'Reason', 'Appeal Strategy'];
+            const rows = currentData.flagged.map(claim => {
+                const amount = claim.claim_amount || claim.amount || 0;
+                return [
+                    claim.patient_id || claim.row || 'N/A',
+                    claim.procedure_code || 'N/A',
+                    claim.diagnosis_code || 'N/A',
+                    amount ? parseFloat(amount).toFixed(2) : '0.00',
+                    claim.denial_code || 'N/A',
+                    (claim.reason || 'N/A').replace(/"/g, '""'), // Escape quotes
+                    (claim.appeal || 'N/A').replace(/"/g, '""')
+                ];
+            });
             
             // Create CSV string
             const csvContent = [
@@ -601,12 +646,87 @@
                 appeals.forEach((appeal, index) => {
                     const appealCard = document.createElement('div');
                     appealCard.className = 'appeal-card';
+                    const appealId = `appeal-${index}`;
                     appealCard.innerHTML = `
                         <h3>Appeal Letter #${index + 1}</h3>
-                        <div class="appeal-text">${appeal}</div>
+                        <button class="copy-appeal-btn" onclick="copyAppeal('${appealId}')">📋 Copy</button>
+                        <div class="appeal-text" id="${appealId}">${appeal}</div>
                     `;
                     appealsContainer.appendChild(appealCard);
                 });
+            }
+        }
+        
+        function copyAppeal(appealId) {
+            const appealText = document.getElementById(appealId);
+            const text = appealText.textContent;
+            const btn = document.querySelector(`button[onclick="copyAppeal('${appealId}')"]`);
+            
+            navigator.clipboard.writeText(text).then(() => {
+                if (btn) {
+                    const originalText = btn.textContent;
+                    btn.textContent = '✅ Copied!';
+                    btn.style.background = '#51cf66';
+                    setTimeout(() => {
+                        btn.textContent = originalText;
+                        btn.style.background = '#667eea';
+                    }, 2000);
+                }
+            }).catch(err => {
+                alert('Failed to copy. Please select and copy manually.');
+            });
+        }
+        
+        function setupFilters(flagged, denialStats) {
+            const denialFilter = document.getElementById('denialFilter');
+            // Clear existing options except "All"
+            denialFilter.innerHTML = '<option value="">All Denial Codes</option>';
+            
+            // Get unique denial codes
+            const denialCodes = [...new Set(flagged.map(c => c.denial_code).filter(c => c))];
+            denialCodes.forEach(code => {
+                const option = document.createElement('option');
+                option.value = code;
+                const description = denialStats && denialStats[code] ? denialStats[code].description : '';
+                option.textContent = `${code}${description ? ' - ' + description.substring(0, 40) : ''}`;
+                denialFilter.appendChild(option);
+            });
+        }
+        
+        function applyFilters() {
+            if (!currentData) return;
+            
+            const searchTerm = document.getElementById('searchInput').value.toLowerCase();
+            const denialFilter = document.getElementById('denialFilter').value;
+            
+            let filtered = currentData.flagged;
+            
+            // Apply search filter
+            if (searchTerm) {
+                filtered = filtered.filter(claim => 
+                    JSON.stringify(claim).toLowerCase().includes(searchTerm)
+                );
+            }
+            
+            // Apply denial code filter
+            if (denialFilter) {
+                filtered = filtered.filter(claim => 
+                    claim.denial_code === denialFilter
+                );
+            }
+            
+            renderTable(filtered);
+            
+            // Update flagged count
+            document.getElementById('flaggedCount').textContent = filtered.length;
+        }
+        
+        function clearFilters() {
+            document.getElementById('searchInput').value = '';
+            document.getElementById('denialFilter').value = '';
+            if (currentData) {
+                renderTable(currentData.flagged);
+                document.getElementById('flaggedCount').textContent = currentData.flagged.length;
             }
         }
         
