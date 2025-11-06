@@ -278,7 +278,10 @@
             
             <div class="loading" id="loading">
                 <div class="spinner"></div>
-                <p>Analyzing claims with AI... This may take a moment.</p>
+                <p id="loadingText">Analyzing claims with AI... This may take a moment.</p>
+                <div id="progressBar" style="width: 100%; max-width: 400px; height: 8px; background: #e0e0e0; border-radius: 4px; margin: 20px auto; overflow: hidden;">
+                    <div id="progressFill" style="height: 100%; background: linear-gradient(90deg, #667eea, #764ba2); width: 0%; transition: width 0.3s;"></div>
+                </div>
             </div>
             
             <div class="results" id="results">
@@ -294,6 +297,16 @@
                     <div class="stat-card">
                         <h3 class="recovery-highlight" id="recoveryEstimate">$0</h3>
                         <p>Recovery Potential</p>
+                    </div>
+                    <div class="stat-card">
+                        <h3 id="flaggedAmount">$0</h3>
+                        <p>Total Flagged Amount</p>
+                    </div>
+                </div>
+                
+                <div class="denial-stats" id="denialStatsSection" style="display: none; margin-bottom: 30px; background: #f8f9ff; padding: 25px; border-radius: 15px;">
+                    <h2 style="color: #333; margin-bottom: 20px; font-size: 1.8em;">📊 Denial Code Breakdown</h2>
+                    <div id="denialStatsContainer" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 15px;">
                     </div>
                 </div>
                 
@@ -415,7 +428,13 @@
             // Update stats
             document.getElementById('totalClaims').textContent = data.total_claims;
             document.getElementById('flaggedCount').textContent = data.flagged.length;
-            document.getElementById('recoveryEstimate').textContent = `$${data.recovery_estimate.toLocaleString()}`;
+            document.getElementById('recoveryEstimate').textContent = `$${data.recovery_estimate.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}`;
+            document.getElementById('flaggedAmount').textContent = `$${(data.total_flagged_amount || 0).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}`;
+            
+            // Display denial statistics
+            if (data.denial_stats && Object.keys(data.denial_stats).length > 0) {
+                displayDenialStats(data.denial_stats);
+            }
             
             // Show export button if there are flagged claims
             const exportBtn = document.getElementById('exportBtn');
@@ -446,6 +465,39 @@
             
             // Scroll to results
             results.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }
+        
+        function displayDenialStats(stats) {
+            const container = document.getElementById('denialStatsContainer');
+            const section = document.getElementById('denialStatsSection');
+            container.innerHTML = '';
+            
+            // Sort by count (most common first)
+            const sortedStats = Object.entries(stats).sort((a, b) => b[1].count - a[1].count);
+            
+            sortedStats.forEach(([code, info]) => {
+                const statCard = document.createElement('div');
+                statCard.style.cssText = 'background: white; padding: 20px; border-radius: 10px; border-left: 4px solid #667eea; box-shadow: 0 2px 5px rgba(0,0,0,0.1);';
+                statCard.innerHTML = `
+                    <h3 style="color: #667eea; margin-bottom: 10px; font-size: 1.3em;">
+                        <span class="denial-code">${code}</span>
+                    </h3>
+                    <p style="color: #666; margin-bottom: 15px; font-size: 0.95em;">${info.description}</p>
+                    <div style="display: flex; justify-content: space-between; margin-top: 15px;">
+                        <div>
+                            <strong style="color: #333; font-size: 1.5em;">${info.count}</strong>
+                            <p style="color: #666; margin: 5px 0 0 0; font-size: 0.9em;">Claims</p>
+                        </div>
+                        <div style="text-align: right;">
+                            <strong style="color: #51cf66; font-size: 1.5em;">$${info.total_amount.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</strong>
+                            <p style="color: #666; margin: 5px 0 0 0; font-size: 0.9em;">Total Amount</p>
+                        </div>
+                    </div>
+                `;
+                container.appendChild(statCard);
+            });
+            
+            section.style.display = 'block';
         }
         
         function renderTable(flagged) {

@@ -39,6 +39,8 @@ class AuditResult(BaseModel):
     flagged: List[Dict] = []
     recovery_estimate: float = 0.0  # $ potential
     appeals: List[str] = []  # Auto-generated letters
+    denial_stats: Dict = {}  # Denial code breakdown
+    total_flagged_amount: float = 0.0  # Total amount of flagged claims
     
     class Config:
         extra = "allow"  # Allow extra fields
@@ -155,12 +157,13 @@ async def audit_claims(file: UploadFile = File(...)):
                 chunk_flagged = ai_output.get("flagged_claims", [])
                 chunk_recovery = float(ai_output.get("total_recovery", 0))
                 
-                # Adjust row numbers to match actual dataframe indices
+                # Adjust row numbers and enrich with actual data
                 for claim in chunk_flagged:
                     if 'row' in claim:
                         # Convert row number to actual index (AI returns 1-based, we need 0-based)
                         original_row = int(claim.get('row', 1))
                         claim['row'] = chunk_start + original_row - 1
+                    
                     # Add patient_id and other fields from actual dataframe if available
                     row_idx = claim.get('row', chunk_start)
                     if isinstance(row_idx, int) and 0 <= row_idx < len(df):
@@ -170,23 +173,85 @@ async def audit_claims(file: UploadFile = File(...)):
                             claim['procedure_code'] = str(df.iloc[row_idx]['procedure_code'])
                         if 'diagnosis_code' not in claim and 'diagnosis_code' in df.columns:
                             claim['diagnosis_code'] = str(df.iloc[row_idx]['diagnosis_code'])
+                        # Add actual claim amount for better recovery estimation
+                        if 'amount' in df.columns:
+                            claim['claim_amount'] = float(df.iloc[row_idx]['amount'])
                 
                 all_flagged.extend(chunk_flagged)
                 total_recovery += chunk_recovery
             
             # Ensure flagged items are proper dicts
             flagged = [dict(item) if isinstance(item, dict) else item for item in all_flagged]
-            recovery_potential = total_recovery
             
-            # Generate sample appeals
+            # Calculate recovery based on actual claim amounts (more accurate)
+            total_flagged_amount = 0.0
+            for claim in flagged:
+                if 'claim_amount' in claim:
+                    total_flagged_amount += float(claim['claim_amount'])
+                elif 'amount' in claim:
+                    try:
+                        total_flagged_amount += float(claim['amount'])
+                    except:
+                        pass
+            
+            # Use AI estimate if provided and reasonable, otherwise use 70% of flagged amounts (typical appeal success rate)
+            if total_recovery > 0 and total_recovery <= total_flagged_amount * 1.5:  # Sanity check
+                recovery_potential = total_recovery
+            elif total_flagged_amount > 0:
+                recovery_potential = total_flagged_amount * 0.70  # 70% success rate estimate
+            else:
+                recovery_potential = total_recovery if total_recovery > 0 else 0.0
+            
+            # Calculate denial code statistics
+            denial_stats = {}
+            for claim in flagged:
+                denial_code = claim.get('denial_code', 'UNKNOWN')
+                if denial_code not in denial_stats:
+                    denial_stats[denial_code] = {
+                        'count': 0,
+                        'total_amount': 0.0,
+                        'description': DENIAL_RULES.get(denial_code, 'Unknown denial code')
+                    }
+                denial_stats[denial_code]['count'] += 1
+                claim_amt = claim.get('claim_amount') or claim.get('amount', 0)
+                try:
+                    denial_stats[denial_code]['total_amount'] += float(claim_amt)
+                except:
+                    pass
+            
+            # Generate enhanced appeals with more context
             for issue in flagged[:3]:  # Top 3
                 try:
-                    appeal_prompt = f"Write a professional appeal letter for {issue.get('reason', 'denial')}. Patient ID: {df.iloc[0]['patient_id'] if 'patient_id' in df.columns else 'N/A'}. Keep under 200 words."
+                    patient_id = issue.get('patient_id', df.iloc[0]['patient_id'] if 'patient_id' in df.columns else 'N/A')
+                    procedure = issue.get('procedure_code', 'N/A')
+                    diagnosis = issue.get('diagnosis_code', 'N/A')
+                    denial_code = issue.get('denial_code', 'N/A')
+                    reason = issue.get('reason', 'denial')
+                    claim_amt = issue.get('claim_amount') or issue.get('amount', 'N/A')
+                    
+                    appeal_prompt = f"""Write a professional, detailed appeal letter for a medical billing denial.
+
+Patient ID: {patient_id}
+Procedure Code: {procedure}
+Diagnosis Code: {diagnosis}
+Denial Code: {denial_code}
+Reason for Denial: {reason}
+Claim Amount: ${claim_amt}
+
+The appeal letter should:
+1. Be professional and courteous
+2. Clearly state the reason for the appeal
+3. Provide supporting evidence or documentation needed
+4. Request reconsideration of the claim
+5. Include contact information placeholders
+
+Keep it under 250 words and make it ready to use with minimal editing."""
+                    
                     appeal_resp = model.generate_content(appeal_prompt)
                     if appeal_resp and hasattr(appeal_resp, 'text'):
                         appeals.append(appeal_resp.text)
                 except Exception as e:
-                    # Continue if appeal generation fails
+                    logger.error(f"Appeal generation failed: {str(e)}")
                     appeals.append(f"Appeal generation failed for issue: {issue.get('reason', 'Unknown')}")
         
         except json.JSONDecodeError as e:
@@ -199,8 +264,11 @@ async def audit_claims(file: UploadFile = File(...)):
             total_claims=int(total_claims),
             flagged=flagged if flagged else [],
             recovery_estimate=float(recovery_potential) if recovery_potential else 0.0,
-            appeals=appeals if appeals else []
+            appeals=appeals if appeals else [],
+            denial_stats=denial_stats,
+            total_flagged_amount=float(total_flagged_amount)
         )
+        logger.info(f"Audit complete: {len(flagged)} flagged claims, ${recovery_potential:.2f} recovery potential")
         return result
     
     except HTTPException:
