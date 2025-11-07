@@ -472,6 +472,7 @@ def home():
 
 
 @app.get("/app")
+@app.get("/app/")
 def app_ui():
     """Serve the interactive audit application"""
     return FileResponse("static/index.html")
