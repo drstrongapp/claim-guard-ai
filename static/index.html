@@ -376,6 +376,40 @@
             margin-bottom: 20px;
             font-weight: 600;
         }
+
+        .email-input {
+            margin-top: 20px;
+            width: 100%;
+            max-width: 420px;
+            padding: 12px 14px;
+            border: 2px solid #c3dafd;
+            border-radius: 10px;
+            font-size: 1rem;
+            transition: border 0.2s ease, box-shadow 0.2s ease;
+        }
+
+        .email-input:focus {
+            outline: none;
+            border-color: #667eea;
+            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.25);
+        }
+
+        .email-helper {
+            margin-top: 8px;
+            font-size: 0.9rem;
+            color: #5a67d8;
+        }
+
+        .email-confirmation {
+            margin: 0 0 20px 0;
+            font-size: 0.95rem;
+            color: #2f855a;
+            background: #f0fff4;
+            border-left: 4px solid #38a169;
+            padding: 12px 15px;
+            border-radius: 10px;
+            display: none;
+        }
         
         @media (max-width: 768px) {
             .container {
@@ -425,6 +459,10 @@
                 gap: 6px;
                 text-align: center;
             }
+
+            .email-input {
+                max-width: 100%;
+            }
             
             #searchInput,
             #denialFilter {
@@ -453,6 +491,8 @@
                 </div>
                 <div class="file-name" id="fileName"></div>
                 <div class="trust-badges">🔒 HIPAA-Compliant <span>|</span> ⚡ 10-Second Audit <span>|</span> 💰 $265B Industry Problem</div>
+                <input type="email" id="emailInput" class="email-input" placeholder="Email results to me (optional)">
+                <div class="email-helper">We’ll send a PDF summary once the audit finishes.</div>
             </div>
             
             <div class="error" id="errorMessage"></div>
@@ -472,6 +512,7 @@
                         🔄 New Upload
                     </button>
                 </div>
+                <div id="emailConfirmation" class="email-confirmation"></div>
                 <div id="demoNotice" class="demo-notice" style="display: none;">
                     Demo mode: Upload your own CSV to see personalized recovery opportunities.
                 </div>
@@ -578,6 +619,8 @@
         const errorMessage = document.getElementById('errorMessage');
         const demoNotice = document.getElementById('demoNotice');
         const pdfBtn = document.getElementById('pdfBtn');
+        const emailInput = document.getElementById('emailInput');
+        const emailConfirmation = document.getElementById('emailConfirmation');
         const maxFileSizeBytes = 5 * 1024 * 1024;
         const summarySection = document.getElementById('summarySection');
         const summaryHeadline = document.getElementById('summaryHeadline');
@@ -643,6 +686,10 @@
                 if (demoNotice) {
                     demoNotice.style.display = 'none';
                 }
+                if (emailConfirmation) {
+                    emailConfirmation.style.display = 'none';
+                    emailConfirmation.textContent = '';
+                }
                 fileName.textContent = `Selected: ${file.name} (CSV, ${fileSize} KB)`;
                 uploadFile(file);
             }
@@ -651,6 +698,9 @@
         async function uploadFile(file) {
             const formData = new FormData();
             formData.append('file', file);
+            if (emailInput && emailInput.value.trim()) {
+                formData.append('email', emailInput.value.trim());
+            }
             
             // Show loading, hide results and error
             loading.classList.add('active');
@@ -723,6 +773,15 @@
             }
             if (demoNotice) {
                 demoNotice.style.display = demoMode ? 'block' : 'none';
+            }
+            if (emailConfirmation) {
+                if (!demoMode && emailInput && emailInput.value.trim()) {
+                    emailConfirmation.textContent = `Results sent to ${emailInput.value.trim()}.`;
+                    emailConfirmation.style.display = 'block';
+                } else {
+                    emailConfirmation.style.display = 'none';
+                    emailConfirmation.textContent = '';
+                }
             }
             
             // Update stats
@@ -1348,6 +1407,13 @@
             // Reset progress
             document.getElementById('progressFill').style.width = '0%';
             document.getElementById('progressText').textContent = '';
+            if (emailInput) {
+                emailInput.value = '';
+            }
+            if (emailConfirmation) {
+                emailConfirmation.style.display = 'none';
+                emailConfirmation.textContent = '';
+            }
             
             // Scroll to top
             window.scrollTo({ top: 0, behavior: 'smooth' });

@@ -1,7 +1,7 @@
 import smtplib
 from email.mime.text import MIMEText
 
-from fastapi import FastAPI, UploadFile, File, HTTPException
+from fastapi import FastAPI, UploadFile, File, HTTPException, Form
 from fastapi.responses import JSONResponse, FileResponse, StreamingResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 import google.generativeai as genai
@@ -10,7 +10,7 @@ import io
 import os
 import sys
 import json
-from typing import List, Dict
+from typing import List, Dict, Optional
 from pydantic import BaseModel
 from dotenv import load_dotenv
 import logging
@@ -146,7 +146,10 @@ def build_summary(total_claims: int, flagged: List[Dict], denial_stats: Dict, re
     return summary
 
 @app.post("/audit", response_model=AuditResult)
-async def audit_claims(file: UploadFile = File(..., description="CSV file only, maximum size 5MB")):
+async def audit_claims(
+    file: UploadFile = File(..., description="CSV file only, maximum size 5MB"),
+    email: Optional[str] = Form(None)
+):
     logger.info(f"Received file upload: {file.filename}")
     
     # Validate file type
@@ -377,6 +380,11 @@ Keep it under 250 words and make it ready to use with minimal editing."""
             total_flagged_amount=float(total_flagged_amount),
             summary=summary
         )
+        if email:
+            try:
+                email_results(email, result.dict())
+            except Exception as e:
+                logger.error(f"Deferred email sending failed for {email}: {str(e)}")
         logger.info(f"Audit complete: {len(flagged)} flagged claims, ${recovery_potential:.2f} recovery potential")
         return result
     
