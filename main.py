@@ -50,6 +50,7 @@ class AuditResult(BaseModel):
     appeals: List[str] = []  # Auto-generated letters
     denial_stats: Dict = {}  # Denial code breakdown
     total_flagged_amount: float = 0.0  # Total amount of flagged claims
+    summary: Dict = {}  # High-level summary for UI
     
     class Config:
         extra = "allow"  # Allow extra fields
@@ -79,6 +80,67 @@ DENIAL_RULES = {
     "OA-18": "Claim/service lacks information needed for adjudication.",
     "OA-23": "Impact of prior payer(s) adjudication – coordination of benefits."
 }
+
+def build_summary(total_claims: int, flagged: List[Dict], denial_stats: Dict, recovery_potential: float, total_flagged_amount: float) -> Dict:
+    """Create a concise summary of audit results for UI display."""
+    summary = {}
+    flagged_count = len(flagged)
+    
+    if flagged_count == 0:
+        summary["headline"] = "✅ All clear — no potential denials detected."
+        summary["details"] = [
+            f"Reviewed {total_claims} claims with no issues flagged.",
+            "Continue submitting claims as usual and monitor for future denials."
+        ]
+        summary["recommended_actions"] = [
+            "Share this clean audit with your team.",
+            "Set a reminder to re-run ClaimGuard AI after the next billing cycle."
+        ]
+        summary["top_denials"] = []
+        return summary
+    
+    top_denials = sorted(denial_stats.items(), key=lambda item: item[1]["count"], reverse=True)
+    top_denials_strings = [
+        f"{code} · {data['count']} claims (${data['total_amount']:.2f})"
+        for code, data in top_denials[:3]
+    ]
+    
+    avg_flagged_amount = (total_flagged_amount / flagged_count) if flagged_count else 0.0
+    
+    summary["headline"] = (
+        f"⚠️ {flagged_count} of {total_claims} claims flagged "
+        f"(${total_flagged_amount:.2f} at risk)."
+    )
+    summary["details"] = [
+        f"Estimated recovery potential: ${recovery_potential:.2f}.",
+        f"Average flagged claim amount: ${avg_flagged_amount:.2f}.",
+        f"Top denial codes: {', '.join(top_denials_strings) if top_denials_strings else 'n/a'}."
+    ]
+    
+    recommended_actions = []
+    for code, data in top_denials[:3]:
+        description = data.get("description") or DENIAL_RULES.get(code, "")
+        if description:
+            recommended_actions.append(f"{code}: {description}")
+    
+    if not recommended_actions:
+        recommended_actions.append("Review flagged claims and submit appeals promptly.")
+    
+    if recovery_potential > 0:
+        recommended_actions.append("Prioritize high-dollar claims to maximize recovered revenue.")
+    
+    summary["recommended_actions"] = recommended_actions
+    summary["top_denials"] = [
+        {
+            "code": code,
+            "count": data["count"],
+            "total_amount": data["total_amount"],
+            "description": data.get("description")
+        }
+        for code, data in top_denials[:5]
+    ]
+    
+    return summary
 
 @app.post("/audit", response_model=AuditResult)
 async def audit_claims(file: UploadFile = File(...)):
@@ -309,13 +371,16 @@ Keep it under 250 words and make it ready to use with minimal editing."""
             raise HTTPException(500, f"AI processing error: {str(e)}")
         
         # Ensure all data types are correct
+        summary = build_summary(total_claims, flagged, denial_stats, recovery_potential, total_flagged_amount)
+        
         result = AuditResult(
             total_claims=int(total_claims),
             flagged=flagged if flagged else [],
             recovery_estimate=float(recovery_potential) if recovery_potential else 0.0,
             appeals=appeals if appeals else [],
             denial_stats=denial_stats,
-            total_flagged_amount=float(total_flagged_amount)
+            total_flagged_amount=float(total_flagged_amount),
+            summary=summary
         )
         logger.info(f"Audit complete: {len(flagged)} flagged claims, ${recovery_potential:.2f} recovery potential")
         return result
@@ -358,6 +423,36 @@ async def export_results(audit_data: dict):
     except Exception as e:
         logger.error(f"Export error: {str(e)}")
         raise HTTPException(500, f"Export failed: {str(e)}")
+
+@app.post("/export/appeals")
+async def export_appeals(audit_data: dict):
+    """Export generated appeal letters as a downloadable text file"""
+    try:
+        appeals = audit_data.get("appeals", [])
+        if not appeals:
+            raise HTTPException(400, "No appeal letters to export")
+        
+        output = io.StringIO()
+        for idx, appeal in enumerate(appeals, 1):
+            output.write(f"Appeal Letter #{idx}\n")
+            output.write("=" * 60 + "\n")
+            output.write(appeal.strip())
+            output.write("\n\n")
+        
+        output.seek(0)
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"claimguard_appeals_{timestamp}.txt"
+        
+        return StreamingResponse(
+            io.BytesIO(output.getvalue().encode("utf-8")),
+            media_type="text/plain",
+            headers={"Content-Disposition": f"attachment; filename={filename}"}
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Appeals export error: {str(e)}")
+        raise HTTPException(500, f"Export appeals failed: {str(e)}")
 
 @app.get("/health")
 def health_check():

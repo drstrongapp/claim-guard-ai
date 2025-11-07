@@ -283,6 +283,59 @@
             font-weight: 600;
         }
         
+        .summary-section {
+            margin-bottom: 30px;
+        }
+        
+        .summary-card {
+            background: linear-gradient(135deg, #f6f9ff 0%, #eef2ff 100%);
+            border-left: 5px solid #667eea;
+            border-radius: 15px;
+            padding: 25px;
+            box-shadow: 0 10px 30px rgba(102, 126, 234, 0.15);
+        }
+        
+        .summary-card h2 {
+            color: #4c51bf;
+            margin-bottom: 15px;
+        }
+        
+        .summary-headline {
+            font-size: 1.2em;
+            font-weight: 600;
+            color: #2d3748;
+            margin-bottom: 15px;
+        }
+        
+        .summary-details,
+        .summary-actions {
+            list-style: none;
+            margin-bottom: 15px;
+        }
+        
+        .summary-details li,
+        .summary-actions li {
+            margin-bottom: 8px;
+            color: #4a5568;
+            display: flex;
+            align-items: flex-start;
+            gap: 8px;
+        }
+        
+        .summary-details li::before {
+            content: "•";
+            color: #667eea;
+            font-weight: bold;
+            margin-right: 6px;
+        }
+        
+        .summary-actions li::before {
+            content: "→";
+            color: #48bb78;
+            font-weight: bold;
+            margin-right: 6px;
+        }
+        
         @media (max-width: 768px) {
             .container {
                 margin: 10px;
@@ -367,6 +420,15 @@
                         🔄 New Upload
                     </button>
                 </div>
+                <div class="summary-section" id="summarySection" style="display: none;">
+                    <div class="summary-card">
+                        <h2>📈 Audit Summary</h2>
+                        <p class="summary-headline" id="summaryHeadline"></p>
+                        <ul class="summary-details" id="summaryDetails"></ul>
+                        <h3 style="color: #2d3748; margin-bottom: 10px;" id="summaryActionsTitle">Next Best Actions</h3>
+                        <ul class="summary-actions" id="summaryActions"></ul>
+                    </div>
+                </div>
                 <div class="stats">
                     <div class="stat-card">
                         <h3 id="totalClaims">0</h3>
@@ -395,9 +457,14 @@
                 <div class="flagged-claims" id="flaggedSection">
                     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
                         <h2>🚩 Flagged Claims</h2>
-                        <button class="upload-btn" id="exportBtn" onclick="exportResults()" style="display: none;">
-                            📥 Export Results
-                        </button>
+                        <div style="display: flex; gap: 10px;">
+                            <button class="upload-btn" id="appealsExportBtn" onclick="downloadAppeals()" style="display: none; background: #48bb78;">
+                                📝 Export Appeals
+                            </button>
+                            <button class="upload-btn" id="exportBtn" onclick="exportResults()" style="display: none;">
+                                📥 Export Results
+                            </button>
+                        </div>
                     </div>
                     <div style="margin-bottom: 15px; display: flex; gap: 15px; flex-wrap: wrap; align-items: center;">
                         <input type="text" id="searchInput" placeholder="🔍 Search claims..." 
@@ -441,6 +508,13 @@
         const loading = document.getElementById('loading');
         const results = document.getElementById('results');
         const errorMessage = document.getElementById('errorMessage');
+        const summarySection = document.getElementById('summarySection');
+        const summaryHeadline = document.getElementById('summaryHeadline');
+        const summaryDetails = document.getElementById('summaryDetails');
+        const summaryActions = document.getElementById('summaryActions');
+        const summaryActionsTitle = document.getElementById('summaryActionsTitle');
+        const exportBtn = document.getElementById('exportBtn');
+        const appealsExportBtn = document.getElementById('appealsExportBtn');
         
         // Drag and drop
         uploadSection.addEventListener('dragover', (e) => {
@@ -548,12 +622,20 @@
                 displayDenialStats(data.denial_stats);
             }
             
-            // Show export button if there are flagged claims
-            const exportBtn = document.getElementById('exportBtn');
+            // Show summary
+            renderSummary(data.summary);
+            
+            // Show export buttons if there are flagged claims or appeals
             if (data.flagged.length > 0) {
                 exportBtn.style.display = 'inline-block';
             } else {
                 exportBtn.style.display = 'none';
+            }
+            
+            if (data.appeals && data.appeals.length > 0) {
+                appealsExportBtn.style.display = 'inline-block';
+            } else {
+                appealsExportBtn.style.display = 'none';
             }
             
             // Display flagged claims
@@ -710,6 +792,45 @@
             document.body.removeChild(link);
         }
         
+        async function downloadAppeals() {
+            if (!currentData || !currentData.appeals || !currentData.appeals.length) {
+                alert('No appeal letters to export');
+                return;
+            }
+            
+            try {
+                const response = await fetch('/export/appeals', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ appeals: currentData.appeals })
+                });
+                
+                if (!response.ok) {
+                    let errorText = 'Export failed';
+                    try {
+                        const error = await response.json();
+                        errorText = error.detail || error.message || JSON.stringify(error);
+                    } catch (e) {
+                        errorText = await response.text();
+                    }
+                    throw new Error(errorText);
+                }
+                
+                const blob = await response.blob();
+                const url = window.URL.createObjectURL(blob);
+                const link = document.createElement('a');
+                link.href = url;
+                link.download = `claimguard_appeals_${new Date().toISOString().split('T')[0]}.txt`;
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+                window.URL.revokeObjectURL(url);
+            } catch (error) {
+                console.error('Appeals export error:', error);
+                showError(error.message || 'Failed to export appeals. Please try again.');
+            }
+        }
+        
         // Display appeals (called from displayResults)
         function displayAppeals(appeals) {
             const appealsContainer = document.getElementById('appealsContainer');
@@ -808,6 +929,37 @@
         function showError(message) {
             errorMessage.textContent = `Error: ${message}`;
             errorMessage.classList.add('active');
+        }
+        
+        function renderSummary(summary) {
+            if (!summary || Object.keys(summary).length === 0) {
+                summarySection.style.display = 'none';
+                return;
+            }
+            
+            summaryHeadline.textContent = summary.headline || 'Audit summary';
+            
+            summaryDetails.innerHTML = '';
+            (summary.details || []).forEach(detail => {
+                const li = document.createElement('li');
+                li.textContent = detail;
+                summaryDetails.appendChild(li);
+            });
+            
+            summaryActions.innerHTML = '';
+            const actions = summary.recommended_actions || summary.actions || [];
+            if (actions.length === 0) {
+                summaryActionsTitle.style.display = 'none';
+            } else {
+                summaryActionsTitle.style.display = 'block';
+                actions.forEach(action => {
+                    const li = document.createElement('li');
+                    li.textContent = action;
+                    summaryActions.appendChild(li);
+                });
+            }
+            
+            summarySection.style.display = 'block';
         }
         
         function resetForm() {
