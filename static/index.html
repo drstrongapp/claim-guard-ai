@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>ClaimGuard AI - Medical Billing Denial Auditor</title>
+    <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
         * {
@@ -350,6 +351,27 @@
             color: #4c51bf;
         }
         
+        .trust-badges {
+            margin-top: 25px;
+            font-size: 0.95rem;
+            color: #4a5568;
+            font-weight: 600;
+            display: flex;
+            justify-content: center;
+            gap: 12px;
+            flex-wrap: wrap;
+        }
+        
+        .demo-notice {
+            background: #f0f4ff;
+            color: #4c51bf;
+            border-left: 4px solid #667eea;
+            padding: 15px;
+            border-radius: 10px;
+            margin-bottom: 20px;
+            font-weight: 600;
+        }
+        
         @media (max-width: 768px) {
             .container {
                 margin: 10px;
@@ -389,6 +411,12 @@
                 padding: 25px 15px;
             }
             
+            .trust-badges {
+                font-size: 0.9rem;
+                gap: 6px;
+                text-align: center;
+            }
+            
             #searchInput,
             #denialFilter {
                 width: 100%;
@@ -415,6 +443,7 @@
                     </button>
                 </div>
                 <div class="file-name" id="fileName"></div>
+                <div class="trust-badges">🔒 HIPAA-Compliant <span>|</span> ⚡ 10-Second Audit <span>|</span> 💰 $265B Industry Problem</div>
             </div>
             
             <div class="error" id="errorMessage"></div>
@@ -433,6 +462,9 @@
                     <button class="upload-btn" onclick="resetForm()" style="background: #6c757d;">
                         🔄 New Upload
                     </button>
+                </div>
+                <div id="demoNotice" class="demo-notice" style="display: none;">
+                    Demo mode: Upload your own CSV to see personalized recovery opportunities.
                 </div>
                 <div class="summary-section" id="summarySection" style="display: none;">
                     <div class="summary-card">
@@ -478,6 +510,9 @@
                         <div style="display: flex; gap: 10px;">
                             <button class="upload-btn" id="appealsExportBtn" onclick="downloadAppeals()" style="display: none; background: #48bb78;">
                                 📝 Export Appeals
+                            </button>
+                            <button class="upload-btn" id="pdfBtn" onclick="downloadPDF()" style="display: none; background: #1f2933;">
+                                📄 Download Appeals (PDF)
                             </button>
                             <button class="upload-btn" id="exportBtn" onclick="exportResults()" style="display: none;">
                                 📥 Export Results
@@ -526,6 +561,9 @@
         const loading = document.getElementById('loading');
         const results = document.getElementById('results');
         const errorMessage = document.getElementById('errorMessage');
+        const demoNotice = document.getElementById('demoNotice');
+        const pdfBtn = document.getElementById('pdfBtn');
+        const maxFileSizeBytes = 5 * 1024 * 1024;
         const summarySection = document.getElementById('summarySection');
         const summaryHeadline = document.getElementById('summaryHeadline');
         const summaryDetails = document.getElementById('summaryDetails');
@@ -551,13 +589,18 @@
             uploadSection.classList.remove('dragover');
             const files = e.dataTransfer.files;
             if (files.length > 0) {
-                const fileName = files[0].name.toLowerCase();
-                if (fileName.endsWith('.csv')) {
-                    fileInput.files = files;
-                    handleFileSelect();
-                } else {
+                const droppedFile = files[0];
+                const droppedName = droppedFile.name.toLowerCase();
+                if (!droppedName.endsWith('.csv')) {
                     showError('Please upload a CSV file (.csv) up to 5MB in size.');
+                    return;
                 }
+                if (droppedFile.size > maxFileSizeBytes) {
+                    showError('File too large. Maximum file size is 5MB.');
+                    return;
+                }
+                fileInput.files = files;
+                handleFileSelect();
             }
         });
         
@@ -569,7 +612,21 @@
                 const fileSize = (file.size / 1024).toFixed(2);
                 if (!file.name.toLowerCase().endsWith('.csv')) {
                     showError('Please upload a CSV file (.csv) up to 5MB in size.');
+                    fileInput.value = '';
+                    fileUploaded = false;
                     return;
+                }
+                if (file.size > maxFileSizeBytes) {
+                    showError('File too large. Maximum file size is 5MB.');
+                    fileInput.value = '';
+                    fileUploaded = false;
+                    return;
+                }
+                errorMessage.classList.remove('active');
+                fileUploaded = true;
+                demoMode = false;
+                if (demoNotice) {
+                    demoNotice.style.display = 'none';
                 }
                 fileName.textContent = `Selected: ${file.name} (CSV, ${fileSize} KB)`;
                 uploadFile(file);
@@ -633,9 +690,20 @@
         let currentData = null;
         let sortDirection = {};
         let denialChart = null;
+        let fileUploaded = false;
+        let demoMode = false;
         
         function displayResults(data) {
             currentData = data; // Store for export
+            demoMode = !!data.demo;
+            if (demoMode) {
+                fileUploaded = false;
+            } else {
+                fileUploaded = true;
+            }
+            if (demoNotice) {
+                demoNotice.style.display = demoMode ? 'block' : 'none';
+            }
             
             // Update stats
             document.getElementById('totalClaims').textContent = data.total_claims;
@@ -666,8 +734,14 @@
             
             if (data.appeals && data.appeals.length > 0) {
                 appealsExportBtn.style.display = 'inline-block';
+                if (pdfBtn) {
+                    pdfBtn.style.display = 'inline-block';
+                }
             } else {
                 appealsExportBtn.style.display = 'none';
+                if (pdfBtn) {
+                    pdfBtn.style.display = 'none';
+                }
             }
             
             // Display flagged claims
@@ -1046,6 +1120,119 @@
             errorMessage.classList.add('active');
         }
         
+        function downloadPDF() {
+            if (!currentData || !currentData.appeals || currentData.appeals.length === 0) {
+                alert('No appeal letters available to download.');
+                return;
+            }
+            if (!window.jspdf || !window.jspdf.jsPDF) {
+                alert('PDF generator not available. Please try again later.');
+                return;
+            }
+            const { jsPDF } = window.jspdf;
+            const doc = new jsPDF({ unit: 'pt', format: 'letter' });
+            const marginLeft = 50;
+            const maxWidth = 500;
+            const lineHeight = 16;
+            const pageHeight = doc.internal.pageSize.getHeight() - 60;
+            let cursorY = 70;
+
+            doc.setFontSize(18);
+            doc.setFont('helvetica', 'bold');
+            doc.text('ClaimGuard AI Appeal Letters', marginLeft, cursorY);
+            cursorY += 30;
+
+            doc.setFontSize(12);
+            doc.setFont('helvetica', 'normal');
+            currentData.appeals.forEach((appeal, index) => {
+                if (cursorY > pageHeight) {
+                    doc.addPage();
+                    cursorY = 60;
+                }
+                doc.setFont('helvetica', 'bold');
+                doc.text(`Appeal Letter #${index + 1}`, marginLeft, cursorY);
+                cursorY += 18;
+                doc.setFont('helvetica', 'normal');
+                const wrappedLines = doc.splitTextToSize(appeal, maxWidth);
+                wrappedLines.forEach(line => {
+                    if (cursorY > pageHeight) {
+                        doc.addPage();
+                        cursorY = 60;
+                    }
+                    doc.text(line, marginLeft, cursorY);
+                    cursorY += lineHeight;
+                });
+                cursorY += 18;
+            });
+
+            const filename = `claimguard_appeals_${new Date().toISOString().split('T')[0]}.pdf`;
+            doc.save(filename);
+        }
+        
+        function showDemoResults() {
+            if (fileUploaded || demoMode) {
+                return;
+            }
+            const demoData = {
+                demo: true,
+                total_claims: 24,
+                flagged: [
+                    {
+                        patient_id: 'P1045',
+                        procedure_code: '27447',
+                        diagnosis_code: 'M17.11',
+                        claim_amount: 5300.0,
+                        denial_code: 'CO-15',
+                        reason: 'Prior authorization missing for total knee arthroplasty.',
+                        appeal: 'Attach the signed prior authorization approval letter and operative report to validate medical necessity.'
+                    },
+                    {
+                        patient_id: 'P1820',
+                        procedure_code: '22551',
+                        diagnosis_code: 'M54.12',
+                        claim_amount: 4800.0,
+                        denial_code: 'CO-97',
+                        reason: 'Payer flagged spinal fusion as bundled with decompression.',
+                        appeal: 'Clarify that fusion and decompression address separate pathologies and include detailed operative notes.'
+                    },
+                    {
+                        patient_id: 'P2090',
+                        procedure_code: '63650',
+                        diagnosis_code: 'G40.909',
+                        claim_amount: 5600.0,
+                        denial_code: 'CO-11',
+                        reason: 'Diagnosis code does not sufficiently support neurostimulator implantation.',
+                        appeal: 'Submit EEG studies and neurologist attestation confirming seizure frequency and medication refractoriness.'
+                    }
+                ],
+                recovery_estimate: 12400.0,
+                total_flagged_amount: 15700.0,
+                appeals: [
+                    `Dear Claims Review Team,\n\nPlease reconsider the enclosed claims. Each procedure was medically necessary and we have provided supporting documentation to validate coverage. The combined recoverable amount totals $12,400.\n\nThank you,\nClaimGuard AI`,
+                    `To Whom It May Concern,\n\nOur clinical evidence demonstrates why the spinal fusion and decompression should be reimbursed separately. Complete operative detail is enclosed.\n\nRegards,\nClaimGuard AI`
+                ],
+                denial_stats: {
+                    'CO-15': { count: 1, total_amount: 5300.0, description: 'Invalid auth number – resubmit with correct prior auth.' },
+                    'CO-97': { count: 1, total_amount: 4800.0, description: 'Bundled service – unbundle or appeal as distinct.' },
+                    'CO-11': { count: 1, total_amount: 5600.0, description: "Diagnosis doesn't match procedure – appeal with medical necessity docs." }
+                },
+                summary: {
+                    headline: '🚀 Demo: $12,400 potentially recoverable across 3 high-value denials.',
+                    details: [
+                        'Average flagged claim amount: $5,233.33.',
+                        'Top risk areas: orthopedic, spine, and neurology procedures.',
+                        'Appeal templates are ready to send with supporting documentation checklists.'
+                    ],
+                    recommended_actions: [
+                        'Resubmit the knee arthroplasty claim with the completed authorization letter.',
+                        'Send the spinal fusion appeal with operative notes within 48 hours.',
+                        'Have your neurologist sign the medical necessity statement for the neurostimulator.'
+                    ]
+                }
+            };
+            displayResults(demoData);
+        }
+        
         function renderSummary(summary) {
             if (!summary || Object.keys(summary).length === 0) {
                 summarySection.style.display = 'none';
@@ -1100,6 +1287,15 @@
                 denialChart = null;
             }
             denialChartCard.style.display = 'none';
+            if (demoNotice) {
+                demoNotice.style.display = 'none';
+            }
+            if (pdfBtn) {
+                pdfBtn.style.display = 'none';
+            }
+            currentData = null;
+            fileUploaded = false;
+            demoMode = false;
             
             // Reset progress
             document.getElementById('progressFill').style.width = '0%';
@@ -1107,7 +1303,12 @@
             
             // Scroll to top
             window.scrollTo({ top: 0, behavior: 'smooth' });
+            setTimeout(() => {
+                showDemoResults();
+            }, 300);
         }
+        
+        showDemoResults();
         
         // Simulate progress during upload (since we can't get real-time progress from backend)
         function simulateProgress() {
