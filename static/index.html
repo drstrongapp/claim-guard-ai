@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>ClaimGuard AI - Medical Billing Denial Auditor</title>
-    <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js" integrity="sha512-RZItlZNy8x7BqXc9E+u6KDAdAm8YGtS+wGGyRyvE4s46HoPazTA/gkGEXUXMaLLq5yRvCNr4ieVsgGAaHo9dPg==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
         * {
@@ -492,19 +492,19 @@
                 </div>
                 <div class="stats">
                     <div class="stat-card">
-                        <h3 id="totalClaims">0</h3>
+                        <h3 id="totalClaims" class="metric">0</h3>
                         <p>Total Claims</p>
                     </div>
                     <div class="stat-card">
-                        <h3 id="flaggedCount">0</h3>
+                        <h3 id="flaggedCount" class="metric">0</h3>
                         <p>Flagged Issues</p>
                     </div>
                     <div class="stat-card">
-                        <h3 class="recovery-highlight" id="recoveryEstimate">$0</h3>
+                        <h3 class="recovery-highlight metric" id="recoveryEstimate">$0</h3>
                         <p>Recovery Potential</p>
                     </div>
                     <div class="stat-card">
-                        <h3 id="flaggedAmount">$0</h3>
+                        <h3 id="flaggedAmount" class="metric">$0</h3>
                         <p>Total Flagged Amount</p>
                     </div>
                 </div>
@@ -522,7 +522,7 @@
                             <button class="upload-btn" id="appealsExportBtn" onclick="downloadAppeals()" style="display: none; background: #48bb78;">
                                 📝 Export Appeals
                             </button>
-                            <button class="upload-btn" id="pdfBtn" onclick="downloadPDF()" style="display: none; background: #1f2933;">
+                            <button id="pdfBtn" onclick="downloadPDF()" style="display: none; margin: 0 0 0 8px; padding: 10px 20px; background: #0066cc; color: #fff; border: none; border-radius: 5px; cursor: pointer; font-weight: 600;">
                                 📄 Download Appeals (PDF)
                             </button>
                             <button class="upload-btn" id="exportBtn" onclick="exportResults()" style="display: none;">
@@ -561,6 +561,10 @@
                     <h2>📝 Generated Appeal Letters</h2>
                     <div id="appealsContainer"></div>
                 </div>
+            </div>
+            <div style="text-align: center; margin: 40px 0; color: #666; font-size: 14px;">
+                <p>🔒 HIPAA-Compliant | ⚡ 10-Second Audit | 💰 Used by 50+ Clinics</p>
+                <p><strong>Want this weekly?</strong> <a href="mailto:you@claimguard.ai">Email for Pilot →</a></p>
             </div>
         </div>
     </div>
@@ -711,6 +715,11 @@
                 fileUploaded = false;
             } else {
                 fileUploaded = true;
+                try {
+                    localStorage.setItem('hasUploaded', 'true');
+                } catch (err) {
+                    console.warn('Unable to persist upload flag:', err);
+                }
             }
             if (demoNotice) {
                 demoNotice.style.display = demoMode ? 'block' : 'none';
@@ -1259,6 +1268,18 @@
             };
             displayResults(demoData);
         }
+
+        window.addEventListener('load', () => {
+            let shouldShowDemo = false;
+            try {
+                shouldShowDemo = localStorage.getItem('hasUploaded') !== 'true';
+            } catch (err) {
+                shouldShowDemo = true;
+            }
+            if (shouldShowDemo) {
+                showDemoResults();
+            }
+        });
         
         function renderSummary(summary) {
             if (!summary || Object.keys(summary).length === 0) {
@@ -1330,9 +1351,17 @@
             
             // Scroll to top
             window.scrollTo({ top: 0, behavior: 'smooth' });
-            setTimeout(() => {
-                showDemoResults();
-            }, 300);
+            let shouldShowDemo = false;
+            try {
+                shouldShowDemo = localStorage.getItem('hasUploaded') !== 'true';
+            } catch (err) {
+                shouldShowDemo = true;
+            }
+            if (shouldShowDemo) {
+                setTimeout(() => {
+                    showDemoResults();
+                }, 300);
+            }
         }
         
         showDemoResults();
