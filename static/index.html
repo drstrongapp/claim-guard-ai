@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>ClaimGuard AI - Medical Billing Denial Auditor</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
         * {
             margin: 0;
@@ -336,6 +337,19 @@
             margin-right: 6px;
         }
         
+        .chart-card {
+            background: #ffffff;
+            border-radius: 15px;
+            padding: 20px;
+            box-shadow: 0 15px 40px rgba(102, 126, 234, 0.15);
+            margin-bottom: 30px;
+        }
+        
+        .chart-card h3 {
+            margin-bottom: 15px;
+            color: #4c51bf;
+        }
+        
         @media (max-width: 768px) {
             .container {
                 margin: 10px;
@@ -429,6 +443,10 @@
                         <ul class="summary-actions" id="summaryActions"></ul>
                     </div>
                 </div>
+                <div class="chart-card" id="denialChartCard" style="display: none;">
+                    <h3>Denial Patterns</h3>
+                    <canvas id="denialChart" height="220"></canvas>
+                </div>
                 <div class="stats">
                     <div class="stat-card">
                         <h3 id="totalClaims">0</h3>
@@ -515,6 +533,8 @@
         const summaryActionsTitle = document.getElementById('summaryActionsTitle');
         const exportBtn = document.getElementById('exportBtn');
         const appealsExportBtn = document.getElementById('appealsExportBtn');
+        const denialChartCard = document.getElementById('denialChartCard');
+        const denialChartCanvas = document.getElementById('denialChart');
         
         // Drag and drop
         uploadSection.addEventListener('dragover', (e) => {
@@ -607,6 +627,7 @@
         
         let currentData = null;
         let sortDirection = {};
+        let denialChart = null;
         
         function displayResults(data) {
             currentData = data; // Store for export
@@ -620,7 +641,13 @@
             // Display denial statistics
             if (data.denial_stats && Object.keys(data.denial_stats).length > 0) {
                 displayDenialStats(data.denial_stats);
+            } else {
+                const denialStatsSection = document.getElementById('denialStatsSection');
+                if (denialStatsSection) {
+                    denialStatsSection.style.display = 'none';
+                }
             }
+            renderDenialChart(data.denial_stats);
             
             // Show summary
             renderSummary(data.summary);
@@ -693,6 +720,87 @@
             });
             
             section.style.display = 'block';
+        }
+        
+        function renderDenialChart(stats) {
+            if (!denialChartCanvas) {
+                return;
+            }
+            if (!stats || Object.keys(stats).length === 0) {
+                if (denialChart) {
+                    denialChart.destroy();
+                    denialChart = null;
+                }
+                denialChartCard.style.display = 'none';
+                return;
+            }
+            const sortedStats = Object.entries(stats).sort((a, b) => b[1].count - a[1].count);
+            const labels = sortedStats.map(([code]) => code);
+            const counts = sortedStats.map(([, info]) => info.count || 0);
+            const amounts = sortedStats.map(([, info]) => parseFloat(info.total_amount || 0));
+            const ctx = denialChartCanvas.getContext('2d');
+            if (!ctx) {
+                return;
+            }
+            if (denialChart) {
+                denialChart.destroy();
+            }
+            denialChart = new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels,
+                    datasets: [
+                        {
+                            label: 'Flagged Claims',
+                            data: counts,
+                            backgroundColor: 'rgba(102, 126, 234, 0.7)',
+                            borderRadius: 6,
+                            yAxisID: 'y'
+                        },
+                        {
+                            label: 'Total Amount ($)',
+                            data: amounts,
+                            type: 'line',
+                            borderColor: '#48bb78',
+                            backgroundColor: 'rgba(72, 187, 120, 0.2)',
+                            tension: 0.3,
+                            yAxisID: 'y1'
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            title: {
+                                display: true,
+                                text: 'Flagged Count'
+                            }
+                        },
+                        y1: {
+                            beginAtZero: true,
+                            position: 'right',
+                            grid: {
+                                drawOnChartArea: false
+                            },
+                            title: {
+                                display: true,
+                                text: 'Total Amount ($)'
+                            }
+                        }
+                    },
+                    plugins: {
+                        legend: {
+                            labels: {
+                                usePointStyle: true
+                            }
+                        }
+                    }
+                }
+            });
+            denialChartCard.style.display = 'block';
         }
         
         function renderTable(flagged) {
@@ -971,6 +1079,20 @@
             results.classList.remove('active');
             errorMessage.classList.remove('active');
             loading.classList.remove('active');
+            summarySection.style.display = 'none';
+            summaryHeadline.textContent = '';
+            summaryDetails.innerHTML = '';
+            summaryActions.innerHTML = '';
+            summaryActionsTitle.style.display = 'block';
+            const denialStatsSection = document.getElementById('denialStatsSection');
+            if (denialStatsSection) {
+                denialStatsSection.style.display = 'none';
+            }
+            if (denialChart) {
+                denialChart.destroy();
+                denialChart = null;
+            }
+            denialChartCard.style.display = 'none';
             
             // Reset progress
             document.getElementById('progressFill').style.width = '0%';
