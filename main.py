@@ -1,5 +1,5 @@
 from fastapi import FastAPI, UploadFile, File, HTTPException
-from fastapi.responses import JSONResponse, FileResponse, StreamingResponse
+from fastapi.responses import JSONResponse, FileResponse, StreamingResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 import google.generativeai as genai
 import pandas as pd
@@ -390,9 +390,90 @@ Keep it under 250 words and make it ready to use with minimal editing."""
     except Exception as e:
         raise HTTPException(500, f"Unexpected error: {str(e)}")
 
-@app.get("/")
-def root():
-    """Serve the main web interface"""
+@app.get("/", response_class=HTMLResponse)
+def home():
+    """Marketing landing page"""
+    return """
+    <!DOCTYPE html>
+    <html lang=\"en\">
+    <head>
+        <meta charset=\"UTF-8\" />
+        <meta name=\"viewport\" content=\"width=device-width,initial-scale=1\" />
+        <title>ClaimGuard AI | Medical Claim Denial Auditor</title>
+        <style>
+            body {
+                margin: 0;
+                font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                color: #fff;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                min-height: 100vh;
+                text-align: center;
+                padding: 40px 20px;
+            }
+            .card {
+                background: rgba(255,255,255,0.08);
+                padding: 50px 40px;
+                max-width: 640px;
+                border-radius: 24px;
+                box-shadow: 0 25px 70px rgba(0,0,0,0.3);
+                backdrop-filter: blur(18px);
+            }
+            h1 {
+                font-size: 2.75rem;
+                margin-bottom: 20px;
+                letter-spacing: -0.03em;
+            }
+            p {
+                font-size: 1.2rem;
+                line-height: 1.6;
+                margin-bottom: 30px;
+                color: rgba(255,255,255,0.9);
+            }
+            .cta {
+                display: inline-block;
+                padding: 15px 35px;
+                border-radius: 50px;
+                background: #fff;
+                color: #4c51bf;
+                font-weight: 600;
+                font-size: 1.05rem;
+                text-decoration: none;
+                transition: transform 0.2s ease, box-shadow 0.2s ease;
+            }
+            .cta:hover {
+                transform: translateY(-3px);
+                box-shadow: 0 15px 35px rgba(255,255,255,0.35);
+            }
+            .meta {
+                margin-top: 25px;
+                font-size: 0.95rem;
+                color: rgba(255,255,255,0.8);
+            }
+            @media (max-width: 640px) {
+                .card { padding: 40px 30px; }
+                h1 { font-size: 2.1rem; }
+                p { font-size: 1.05rem; }
+            }
+        </style>
+    </head>
+    <body>
+        <div class=\"card\">
+            <h1>ClaimGuard AI</h1>
+            <p>Audit 100 claims in under 10 seconds. Surface denial risks and recover $10K+ in missed reimbursement before payers do.</p>
+            <a class=\"cta\" href=\"/app\">Try the Free Audit</a>
+            <div class=\"meta\">No credit card. Upload a CSV or Excel file and get instant denial insights.</div>
+        </div>
+    </body>
+    </html>
+    """
+
+
+@app.get("/app")
+def app_ui():
+    """Serve the interactive audit application"""
     return FileResponse("static/index.html")
 
 @app.post("/export")
