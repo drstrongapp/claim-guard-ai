@@ -406,12 +406,12 @@
         
         <div class="content">
             <div class="upload-section" id="uploadSection">
-                <h2 style="color: #667eea; margin-bottom: 20px;">Upload Your Claims File</h2>
-                <p style="color: #666; margin-bottom: 30px;">Drag and drop your CSV or Excel file here, or click to browse</p>
+                <h2 style="color: #667eea; margin-bottom: 20px;">Upload Your Claims CSV</h2>
+                <p style="color: #666; margin-bottom: 30px;">Drag and drop your CSV file (max 5MB), or click to browse</p>
                 <div class="file-input-wrapper">
-                    <input type="file" id="fileInput" class="file-input" accept=".csv,.xlsx,.xls">
+                    <input type="file" id="fileInput" class="file-input" accept=".csv">
                     <button class="upload-btn" onclick="document.getElementById('fileInput').click()">
-                        Choose File (CSV/Excel)
+                        Choose CSV File
                     </button>
                 </div>
                 <div class="file-name" id="fileName"></div>
@@ -552,11 +552,11 @@
             const files = e.dataTransfer.files;
             if (files.length > 0) {
                 const fileName = files[0].name.toLowerCase();
-                if (fileName.endsWith('.csv') || fileName.endsWith('.xlsx') || fileName.endsWith('.xls')) {
+                if (fileName.endsWith('.csv')) {
                     fileInput.files = files;
                     handleFileSelect();
                 } else {
-                    showError('Please upload a CSV or Excel file (.csv, .xlsx, .xls)');
+                    showError('Please upload a CSV file (.csv) up to 5MB in size.');
                 }
             }
         });
@@ -567,8 +567,11 @@
             const file = fileInput.files[0];
             if (file) {
                 const fileSize = (file.size / 1024).toFixed(2);
-                const fileType = file.name.toLowerCase().endsWith('.xlsx') || file.name.toLowerCase().endsWith('.xls') ? 'Excel' : 'CSV';
-                fileName.textContent = `Selected: ${file.name} (${fileType}, ${fileSize} KB)`;
+                if (!file.name.toLowerCase().endsWith('.csv')) {
+                    showError('Please upload a CSV file (.csv) up to 5MB in size.');
+                    return;
+                }
+                fileName.textContent = `Selected: ${file.name} (CSV, ${fileSize} KB)`;
                 uploadFile(file);
             }
         }

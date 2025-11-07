@@ -1,3 +1,6 @@
+import smtplib
+from email.mime.text import MIMEText
+
 from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.responses import JSONResponse, FileResponse, StreamingResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
@@ -40,7 +43,7 @@ logger.info("FastAPI app initialized")
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
 # Configuration
-MAX_FILE_SIZE = 10 * 1024 * 1024  # 10MB
+MAX_FILE_SIZE = 5 * 1024 * 1024  # 5MB
 REQUIRED_COLUMNS = ['patient_id', 'procedure_code', 'diagnosis_code', 'amount']
 
 class AuditResult(BaseModel):
@@ -143,7 +146,7 @@ def build_summary(total_claims: int, flagged: List[Dict], denial_stats: Dict, re
     return summary
 
 @app.post("/audit", response_model=AuditResult)
-async def audit_claims(file: UploadFile = File(...)):
+async def audit_claims(file: UploadFile = File(..., description="CSV file only, maximum size 5MB")):
     logger.info(f"Received file upload: {file.filename}")
     
     # Validate file type
@@ -151,8 +154,8 @@ async def audit_claims(file: UploadFile = File(...)):
         raise HTTPException(400, "No file provided. Please upload a CSV or Excel file.")
     
     file_ext = file.filename.lower().split('.')[-1] if '.' in file.filename else ''
-    if file_ext not in ['csv', 'xlsx', 'xls']:
-        raise HTTPException(400, "Only CSV and Excel (.xlsx, .xls) files are supported.")
+    if file_ext != 'csv':
+        raise HTTPException(400, "Please upload a CSV file. Other formats are not currently supported.")
     
     try:
         # Read and validate file size
@@ -160,22 +163,14 @@ async def audit_claims(file: UploadFile = File(...)):
         file_size = len(content)
         
         if file_size > MAX_FILE_SIZE:
-            raise HTTPException(400, f"File too large. Maximum size is {MAX_FILE_SIZE / (1024*1024):.1f}MB. Your file is {file_size / (1024*1024):.1f}MB.")
+            raise HTTPException(400, "File too large. Maximum file size is 5MB.")
         
         if file_size == 0:
             raise HTTPException(400, "File is empty. Please upload a valid CSV or Excel file.")
         
-        # Read file (CSV or Excel)
+        # Read CSV file
         try:
-            if file_ext in ['xlsx', 'xls']:
-                try:
-                    df = pd.read_excel(io.BytesIO(content), engine='openpyxl')
-                except ImportError:
-                    raise HTTPException(500, "Excel support requires openpyxl package. Please contact support.")
-                except Exception as e:
-                    raise HTTPException(400, f"Invalid Excel file. Error: {str(e)}. Please check your file format.")
-            else:
-                df = pd.read_csv(io.BytesIO(content))
+            df = pd.read_csv(io.BytesIO(content))
         except HTTPException:
             raise
         except Exception as e:
@@ -536,24 +531,39 @@ async def export_appeals(audit_data: dict):
         logger.error(f"Appeals export error: {str(e)}")
         raise HTTPException(500, f"Export appeals failed: {str(e)}")
 
+
+def email_results(to_email: str, results: dict):
+    """Send a simple summary email with audit results (placeholder for future SMTP integration)."""
+    if not to_email:
+        return
+    try:
+        subject = "Your ClaimGuard Audit Results"
+        body = (
+            f"Found ${results.get('recovery_estimate', 0):,.2f} in potential recoverable denials.\n"
+            "Appeal letters and detailed findings are available in the ClaimGuard dashboard."
+        )
+        message = MIMEText(body)
+        message['Subject'] = subject
+        message['From'] = 'audit@claimguard.ai'
+        message['To'] = to_email
+
+        # Placeholder SMTP configuration. Replace with SendGrid/Gmail credentials when ready.
+        with smtplib.SMTP('localhost') as smtp:
+            smtp.send_message(message)
+        logger.info(f"Results email sent to {to_email}")
+    except Exception as e:
+        logger.error(f"Email delivery failed for {to_email}: {str(e)}")
+
 @app.get("/health")
 def health_check():
     """Health check endpoint for monitoring"""
     try:
-        # Test if openpyxl is available
-        openpyxl_available = False
-        try:
-            import openpyxl
-            openpyxl_available = True
-        except ImportError:
-            pass
-        
         return {
             "status": "healthy",
             "service": "ClaimGuard AI",
             "gemini_configured": bool(GEMINI_KEY),
             "max_file_size_mb": MAX_FILE_SIZE / (1024 * 1024),
-            "excel_support": openpyxl_available,
+            "excel_support": False,
             "python_version": sys.version.split()[0]
         }
     except Exception as e:
